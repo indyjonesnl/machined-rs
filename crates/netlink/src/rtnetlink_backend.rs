@@ -17,6 +17,11 @@ pub struct RtNetlink {
 
 impl RtNetlink {
     /// Open a netlink connection and spawn its driver onto the tokio runtime.
+    ///
+    /// # Panics
+    ///
+    /// Must be called within a tokio runtime context: it `tokio::spawn`s the
+    /// connection driver, which panics if no runtime is active.
     pub fn new() -> Result<Self> {
         let (connection, handle, _) =
             rtnetlink::new_connection().map_err(|e| NetlinkError::Netlink(e.to_string()))?;
@@ -157,7 +162,12 @@ impl NetworkBackend for RtNetlink {
 
     async fn add_route(&self, route: &RouteReq) -> Result<()> {
         let index = self.link_index(&route.link).await?;
-        let add = self.handle.route().add().output_interface(index);
+        let add = self
+            .handle
+            .route()
+            .add()
+            .output_interface(index)
+            .priority(route.metric);
         match (route.destination, route.gateway) {
             (Some(dst), gw) => match (dst.ip, gw) {
                 (IpAddr::V4(d), Some(IpAddr::V4(g))) => add
