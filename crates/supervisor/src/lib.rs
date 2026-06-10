@@ -6,3 +6,6 @@ pub mod runner;
 
 pub use process::ProcessRunner;
 pub use runner::{RunOutcome, Runner, RunnerError};
+
+pub mod restart;
+pub use restart::{Policy, RestartRunner};
