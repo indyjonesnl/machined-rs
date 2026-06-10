@@ -35,13 +35,14 @@ impl Runner for ProcessRunner {
             .split_first()
             .ok_or_else(|| RunnerError::Other(format!("service {} has empty command", self.id)))?;
 
-        let child = Command::new(program)
-            .args(args)
-            .spawn()
-            .map_err(|source| RunnerError::Spawn {
-                id: self.id.clone(),
-                source,
-            })?;
+        let child =
+            Command::new(program)
+                .args(args)
+                .spawn()
+                .map_err(|source| RunnerError::Spawn {
+                    id: self.id.clone(),
+                    source,
+                })?;
         self.child = Some(child);
 
         let status = self

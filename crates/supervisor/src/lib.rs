@@ -9,3 +9,9 @@ pub use runner::{RunOutcome, Runner, RunnerError};
 
 pub mod restart;
 pub use restart::{Policy, RestartRunner};
+
+pub mod manager;
+pub mod service;
+
+pub use manager::{start_order, ServiceManager};
+pub use service::{publish_status, run_service};

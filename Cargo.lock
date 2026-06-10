@@ -198,6 +198,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "machined-supervisor"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "machined-common",
+ "machined-config",
+ "machined-resources",
+ "machined-runtime-core",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
