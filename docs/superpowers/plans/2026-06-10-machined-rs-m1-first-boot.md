@@ -1478,7 +1478,9 @@ pub struct SequencerCtx {
     pub services: Arc<Mutex<ServiceManager>>,
 }
 
-/// A single idempotent step in a sequence.
+/// A single step in a sequence. Tasks *should* be written to be idempotent
+/// (re-running a sequence is a goal for M5 recovery), but the M1 sequencer runs
+/// each sequence exactly once and does not yet enforce re-entrancy.
 #[async_trait]
 pub trait Task: Send + Sync {
     fn name(&self) -> &str;
@@ -1658,10 +1660,13 @@ mod tests {
 
         boot_sequence().run(&ctx).await.unwrap();
 
-        let rec = platform.recorded.lock().unwrap();
-        assert_eq!(rec.mounts.len(), essential_mounts().len());
-        assert_eq!(rec.hostname.as_deref(), Some("node-1"));
-        drop(rec);
+        // Block-scope the guard so it provably drops before the later .await
+        // (clippy's await_holding_lock does not track an explicit drop()).
+        {
+            let rec = platform.recorded.lock().unwrap();
+            assert_eq!(rec.mounts.len(), essential_mounts().len());
+            assert_eq!(rec.hostname.as_deref(), Some("node-1"));
+        }
 
         // The service eventually publishes status.
         let k = machined_resources::Key::new(

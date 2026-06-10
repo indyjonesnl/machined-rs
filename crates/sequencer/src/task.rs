@@ -29,7 +29,9 @@ pub struct SequencerCtx {
     pub services: Arc<Mutex<ServiceManager>>,
 }
 
-/// A single idempotent step in a sequence.
+/// A single step in a sequence. Tasks *should* be written to be idempotent
+/// (re-running a sequence is a goal for M5 recovery), but the M1 sequencer runs
+/// each sequence exactly once and does not yet enforce re-entrancy.
 #[async_trait]
 pub trait Task: Send + Sync {
     fn name(&self) -> &str;
