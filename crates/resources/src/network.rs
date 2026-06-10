@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::net::IpAddr;
+use std::str::FromStr;
 
 /// An IP address with a prefix length, e.g. `192.168.1.10/24`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -19,6 +20,33 @@ impl AddrCidr {
 impl fmt::Display for AddrCidr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.ip, self.prefix)
+    }
+}
+
+/// Error parsing an `AddrCidr` from `ip/prefix` text.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AddrCidrParseError;
+
+impl fmt::Display for AddrCidrParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("invalid ip/prefix address")
+    }
+}
+
+impl std::error::Error for AddrCidrParseError {}
+
+impl FromStr for AddrCidr {
+    type Err = AddrCidrParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (ip_s, prefix_s) = s.split_once('/').ok_or(AddrCidrParseError)?;
+        let ip: IpAddr = ip_s.parse().map_err(|_| AddrCidrParseError)?;
+        let prefix: u8 = prefix_s.parse().map_err(|_| AddrCidrParseError)?;
+        let max = if ip.is_ipv4() { 32 } else { 128 };
+        if prefix > max {
+            return Err(AddrCidrParseError);
+        }
+        Ok(AddrCidr { ip, prefix })
     }
 }
 
@@ -93,5 +121,15 @@ mod tests {
     fn addr_cidr_display() {
         let a = AddrCidr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)), 24);
         assert_eq!(a.to_string(), "192.168.1.10/24");
+    }
+
+    #[test]
+    fn addr_cidr_parses() {
+        let a: AddrCidr = "192.168.1.10/24".parse().unwrap();
+        assert_eq!(a.ip, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)));
+        assert_eq!(a.prefix, 24);
+        assert!("nope".parse::<AddrCidr>().is_err());
+        assert!("192.168.1.10/x".parse::<AddrCidr>().is_err());
+        assert!("192.168.1.10".parse::<AddrCidr>().is_err());
     }
 }

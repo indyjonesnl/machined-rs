@@ -7,7 +7,7 @@ pub mod resource;
 
 pub use metadata::{Key, Metadata, Phase, ResourceType};
 pub use network::{
-    AddrCidr, AddressSpec, AddressStatus, HostnameSpec, LinkSpec, LinkStatus, ResolverSpec,
-    RouteSpec, RouteStatus,
+    AddrCidr, AddrCidrParseError, AddressSpec, AddressStatus, HostnameSpec, LinkSpec, LinkStatus,
+    ResolverSpec, RouteSpec, RouteStatus,
 };
 pub use resource::{MachineConfigSpec, Resource, ResourceObject, ServiceState, ServiceStatusSpec};
