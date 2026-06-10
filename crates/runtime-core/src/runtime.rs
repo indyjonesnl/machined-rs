@@ -130,6 +130,11 @@ async fn controller_loop(
     let inputs = controller.inputs();
     let mut rx = state.watch();
 
+    // The loop is level-triggered: each wake re-reads current state, so a
+    // missed or coalesced event only delays a reconcile, never drops one. The
+    // debounce below intentionally caps reconciles to ~one per DEBOUNCE window
+    // under sustained input churn.
+
     // Initial reconcile.
     reconcile_once(&mut controller, &ctx).await;
 
@@ -161,9 +166,9 @@ async fn controller_loop(
 }
 
 fn matches_inputs(inputs: &[Input], event: &Event) -> bool {
-    inputs.iter().any(|i| {
-        i.typ == event.resource_type() && i.namespace == event.namespace()
-    })
+    inputs
+        .iter()
+        .any(|i| i.typ == event.resource_type() && i.namespace == event.namespace())
 }
 
 async fn reconcile_once(controller: &mut Box<dyn Controller>, ctx: &ReconcileCtx) {
@@ -175,9 +180,7 @@ async fn reconcile_once(controller: &mut Box<dyn Controller>, ctx: &ReconcileCtx
 #[cfg(test)]
 mod tests {
     use super::*;
-    use machined_resources::{
-        Key, Resource, ResourceObject, ServiceState, ServiceStatusSpec,
-    };
+    use machined_resources::{Key, Resource, ResourceObject, ServiceState, ServiceStatusSpec};
 
     /// A toy controller: for every ServiceStatus in `Failed` state, it records
     /// a finalizer-free marker by flipping `healthy` to false via update.

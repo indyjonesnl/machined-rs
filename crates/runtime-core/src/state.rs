@@ -67,8 +67,10 @@ impl State {
             .collect()
     }
 
-    /// Create a new resource. The object's version is reset to 1.
-    /// Errors with `AlreadyExists` if the key is taken.
+    /// Create a new resource. The object's version is reset to 1 and its phase
+    /// is forced to `Running` regardless of the supplied metadata; any
+    /// caller-set `finalizers`/`owner` are preserved. Errors with
+    /// `AlreadyExists` if the key is taken.
     pub fn create(&self, mut object: ResourceObject) -> Result<()> {
         let key = object.metadata.key();
         let mut inner = self.inner.lock().unwrap();
