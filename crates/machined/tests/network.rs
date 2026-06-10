@@ -9,7 +9,7 @@ use machined_config::{
     InterfaceConfig, MachineConfig, MachineSection, NetworkSection, Provider, RouteConfig,
 };
 use machined_controllers::network::{
-    AddressController, LinkController, NetworkConfigController, RouteController,
+    AddressController, LinkController, NetworkConfigController, RouteController, NS,
 };
 use machined_netlink::{FakeNetworkBackend, NetworkBackend};
 use machined_resources::{Key, ResourceType};
@@ -77,17 +77,25 @@ async fn config_drives_network_through_controllers() {
         "network was not fully configured through the controllers"
     );
 
-    // Status resources published.
+    // All three status resources published (the live-runtime status path).
     assert!(state
-        .get(&Key::new(NS_LINK(), ResourceType::LinkStatus, "eth0"))
+        .get(&Key::new(NS, ResourceType::LinkStatus, "eth0"))
+        .is_ok());
+    assert!(state
+        .get(&Key::new(
+            NS,
+            ResourceType::AddressStatus,
+            "eth0/10.0.0.5/24"
+        ))
+        .is_ok());
+    assert!(state
+        .get(&Key::new(
+            NS,
+            ResourceType::RouteStatus,
+            "eth0/default/10.0.0.1"
+        ))
         .is_ok());
 
     shutdown.cancel();
     let _ = handle.await;
-}
-
-// The controllers' namespace constant is private; mirror it here for the test.
-#[allow(non_snake_case)]
-fn NS_LINK() -> &'static str {
-    "network"
 }
