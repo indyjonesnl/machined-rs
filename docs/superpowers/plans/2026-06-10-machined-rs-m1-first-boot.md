@@ -760,6 +760,10 @@ impl Runner for ProcessRunner {
 
         let child = Command::new(program)
             .args(args)
+            // Kill the child if its task is aborted/dropped, so shutdown
+            // (which aborts the supervising task) does not orphan the process
+            // onto PID 1. Graceful SIGTERM + grace timeout lands in M5.
+            .kill_on_drop(true)
             .spawn()
             .map_err(|source| RunnerError::Spawn {
                 id: self.id.clone(),
@@ -1080,7 +1084,13 @@ pub fn publish_status(state: &State, id: &str, st: ServiceState, healthy: bool, 
     let k = key(id);
     match state.get(&k) {
         Ok(existing) => {
-            let _ = state.update(&k, existing.metadata.version, Resource::ServiceStatus(spec));
+            // Single-writer-per-service (one run_service task owns each id), so a
+            // conflict here is unexpected; log it rather than silently dropping
+            // the transition.
+            if let Err(e) = state.update(&k, existing.metadata.version, Resource::ServiceStatus(spec))
+            {
+                debug!(service = id, error = %e, "dropped ServiceStatus update");
+            }
         }
         Err(_) => {
             let _ = state.create(ResourceObject::new(NS, id, Resource::ServiceStatus(spec)));
