@@ -441,6 +441,12 @@ git add Cargo.toml Cargo.lock crates/netlink
 git commit -m "feat(netlink): NetworkBackend trait + in-memory fake"
 ```
 
+> **Review follow-up (applied):** the fake also gets a `pub fn routes(&self) -> Vec<RouteReq>`
+> inspection accessor (the trait has no `list_routes`) and a `route_add_del_is_idempotent` test
+> covering `add_route` dedup + `del_route` retain — the route path otherwise has the same idempotency
+> contract as addresses but no coverage. M2a-2b's RouteController tests use `routes()` to observe
+> applied routes against the fake.
+
 ---
 
 ## Task 3: `RtNetlink` real backend + netns integration test
