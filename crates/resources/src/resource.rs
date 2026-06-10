@@ -2,6 +2,10 @@
 //! (metadata + spec) stored by the runtime.
 
 use crate::metadata::{Metadata, ResourceType};
+use crate::network::{
+    AddressSpec, AddressStatus, HostnameSpec, LinkSpec, LinkStatus, ResolverSpec, RouteSpec,
+    RouteStatus,
+};
 
 /// Spec for the loaded machine configuration, surfaced as a resource so
 /// controllers reconcile against it via the normal watch path.
@@ -36,6 +40,14 @@ pub enum ServiceState {
 pub enum Resource {
     MachineConfig(MachineConfigSpec),
     ServiceStatus(ServiceStatusSpec),
+    LinkSpec(LinkSpec),
+    AddressSpec(AddressSpec),
+    RouteSpec(RouteSpec),
+    HostnameSpec(HostnameSpec),
+    ResolverSpec(ResolverSpec),
+    LinkStatus(LinkStatus),
+    AddressStatus(AddressStatus),
+    RouteStatus(RouteStatus),
 }
 
 impl Resource {
@@ -44,6 +56,14 @@ impl Resource {
         match self {
             Resource::MachineConfig(_) => ResourceType::MachineConfig,
             Resource::ServiceStatus(_) => ResourceType::ServiceStatus,
+            Resource::LinkSpec(_) => ResourceType::LinkSpec,
+            Resource::AddressSpec(_) => ResourceType::AddressSpec,
+            Resource::RouteSpec(_) => ResourceType::RouteSpec,
+            Resource::HostnameSpec(_) => ResourceType::HostnameSpec,
+            Resource::ResolverSpec(_) => ResourceType::ResolverSpec,
+            Resource::LinkStatus(_) => ResourceType::LinkStatus,
+            Resource::AddressStatus(_) => ResourceType::AddressStatus,
+            Resource::RouteStatus(_) => ResourceType::RouteStatus,
         }
     }
 }
