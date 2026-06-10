@@ -534,10 +534,12 @@ impl NetworkBackend for RtNetlink {
                     _ => {}
                 }
             }
+            // netlink-packet-route 0.19 models flags as `Vec<LinkFlag>`, not a
+            // bitflags `LinkFlags` — so test membership of `&LinkFlag::Up`.
             let up = msg
                 .header
                 .flags
-                .contains(netlink_packet_route::link::LinkFlags::Up);
+                .contains(&netlink_packet_route::link::LinkFlag::Up);
             out.push(LinkState { name, up, mtu, mac });
         }
         Ok(out)
@@ -614,7 +616,15 @@ impl NetworkBackend for RtNetlink {
 
     async fn add_route(&self, route: &RouteReq) -> Result<()> {
         let index = self.link_index(&route.link).await?;
-        let add = self.handle.route().add().output_interface(index);
+        // `.priority()` is on the generic `RouteAddRequest<T>` (valid before
+        // `.v4()`/`.v6()`), so applying it on the shared `add` binding wires the
+        // metric into every arm below.
+        let add = self
+            .handle
+            .route()
+            .add()
+            .output_interface(index)
+            .priority(route.metric);
         match (route.destination, route.gateway) {
             (Some(dst), gw) => match (dst.ip, gw) {
                 (IpAddr::V4(d), Some(IpAddr::V4(g))) => add
@@ -665,10 +675,12 @@ impl NetworkBackend for RtNetlink {
 }
 ```
 
-> If `netlink-packet-route` types (`LinkAttribute`, `AddressAttribute`, `LinkFlags`) are not
-> reachable transitively through `rtnetlink`, add `netlink-packet-route` as an explicit Linux
-> dependency in `crates/netlink/Cargo.toml` (matching the version `rtnetlink` 0.14 re-exports) and
-> note it in your report.
+> CONFIRMED during the spike: `rtnetlink` 0.14.1 does NOT re-export `netlink_packet_route` as a
+> usable module path, so `netlink-packet-route = "0.19"` MUST be added as an explicit Linux-target
+> dependency in both the root `[workspace.dependencies]` and `crates/netlink/Cargo.toml` (it resolves
+> to the 0.19.0 already in the lock via rtnetlink — no new version pulled). The attribute enums used
+> are `netlink_packet_route::link::{LinkAttribute, LinkFlag}` and
+> `netlink_packet_route::address::AddressAttribute`.
 
 - [ ] **Step 2: Restore the module + re-export in lib.rs**
 
