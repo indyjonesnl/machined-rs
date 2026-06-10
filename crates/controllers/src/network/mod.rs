@@ -2,17 +2,17 @@
 
 pub mod address;
 pub mod config_controller;
-// pub mod hostname;
+pub mod hostname;
 pub mod link;
-// pub mod resolver;
-// pub mod route;
+pub mod resolver;
+pub mod route;
 
 pub use address::AddressController;
 pub use config_controller::NetworkConfigController;
-// pub use hostname::HostnameController;
+pub use hostname::HostnameController;
 pub use link::LinkController;
-// pub use resolver::ResolverController;
-// pub use route::RouteController;
+pub use resolver::ResolverController;
+pub use route::RouteController;
 
 use std::fmt::Display;
 
