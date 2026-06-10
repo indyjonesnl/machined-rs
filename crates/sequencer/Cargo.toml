@@ -1,0 +1,17 @@
+[package]
+name = "machined-sequencer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+machined-common.workspace = true
+machined-config.workspace = true
+machined-platform.workspace = true
+machined-resources.workspace = true
+machined-runtime-core.workspace = true
+machined-supervisor.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true

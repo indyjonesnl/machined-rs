@@ -7,7 +7,7 @@ members = [
     "crates/platform",
     "crates/config",
     "crates/supervisor",
-    # "crates/sequencer",  # created in M1 Task 6
+    "crates/sequencer",
     # "crates/machined",   # created in M1 Task 7
 ]
 
