@@ -5,7 +5,7 @@ use machined_resources::{
     Key, Resource, ResourceObject, ResourceType, ServiceState, ServiceStatusSpec,
 };
 use machined_runtime_core::State;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::runner::{RunOutcome, Runner};
 
@@ -26,7 +26,14 @@ pub fn publish_status(state: &State, id: &str, st: ServiceState, healthy: bool, 
     let k = key(id);
     match state.get(&k) {
         Ok(existing) => {
-            let _ = state.update(&k, existing.metadata.version, Resource::ServiceStatus(spec));
+            // Single-writer-per-service (one run_service task owns each id), so a
+            // conflict here is unexpected; log it rather than silently dropping
+            // the transition.
+            if let Err(e) =
+                state.update(&k, existing.metadata.version, Resource::ServiceStatus(spec))
+            {
+                debug!(service = id, error = %e, "dropped ServiceStatus update");
+            }
         }
         Err(_) => {
             let _ = state.create(ResourceObject::new(NS, id, Resource::ServiceStatus(spec)));
