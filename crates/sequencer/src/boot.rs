@@ -111,6 +111,7 @@ mod tests {
                     depends_on: vec![],
                     restart: RestartPolicy::Never,
                 }],
+                network: Default::default(),
             },
         };
         let ctx = SequencerCtx {

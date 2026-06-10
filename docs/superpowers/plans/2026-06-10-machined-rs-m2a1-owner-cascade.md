@@ -400,6 +400,12 @@ pub use types::{
 };
 ```
 
+- [ ] **Step 5: Update existing `MachineSection { ... }` literals (the new field breaks them)**
+
+Adding the `network` field makes every explicit `MachineSection { ... }` struct literal non-exhaustive (E0063). Two test sites from M1 construct it fully and must add the field. In `crates/sequencer/src/boot.rs` (the `boot_mounts_and_starts_services` test) and `crates/machined/tests/boot_harness.rs` (the `boots_supervises_and_shuts_down` test), add `network: Default::default(),` to the `MachineSection { ... }` literal (after the `services: vec![...]` field).
+
+Run: `cargo build --workspace` — confirm both crates compile.
+
 - [ ] **Step 5: Run tests + clippy**
 
 Run: `cargo test -p machined-config`
