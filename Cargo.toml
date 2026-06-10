@@ -9,6 +9,7 @@ members = [
     "crates/supervisor",
     "crates/sequencer",
     "crates/machined",
+    "crates/netlink",
 ]
 
 [workspace.package]
@@ -27,6 +28,8 @@ nix = { version = "0.29", features = ["mount", "signal", "process", "hostname", 
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rtnetlink = "0.14"
+futures = "0.3"
 
 # internal crates
 machined-common = { path = "crates/common" }
@@ -38,3 +41,4 @@ machined-platform = { path = "crates/platform" }
 machined-config = { path = "crates/config" }
 machined-supervisor = { path = "crates/supervisor" }
 machined-sequencer = { path = "crates/sequencer" }
+machined-netlink = { path = "crates/netlink" }
