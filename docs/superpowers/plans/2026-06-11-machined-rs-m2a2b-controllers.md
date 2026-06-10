@@ -1446,7 +1446,7 @@ use machined_controllers::network::{
     AddressController, LinkController, NetworkConfigController, RouteController,
 };
 use machined_netlink::{FakeNetworkBackend, NetworkBackend};
-use machined_resources::{Key, Resource, ResourceType};
+use machined_resources::{Key, ResourceType};
 use machined_runtime_core::Runtime;
 use tokio_util::sync::CancellationToken;
 
