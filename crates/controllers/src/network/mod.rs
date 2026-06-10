@@ -1,20 +1,16 @@
 //! Network controllers: config -> desired specs -> applied kernel state.
 
-// TEMPORARY (Task 1 interim): helpers below are unused until Tasks 2-3 add the
-// spec controllers. Removed in Task 2 once those controllers use the helpers.
-#![allow(dead_code)]
-
-// pub mod address;
+pub mod address;
 pub mod config_controller;
 // pub mod hostname;
-// pub mod link;
+pub mod link;
 // pub mod resolver;
 // pub mod route;
 
-// pub use address::AddressController;
+pub use address::AddressController;
 pub use config_controller::NetworkConfigController;
 // pub use hostname::HostnameController;
-// pub use link::LinkController;
+pub use link::LinkController;
 // pub use resolver::ResolverController;
 // pub use route::RouteController;
 
