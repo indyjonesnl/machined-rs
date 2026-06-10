@@ -1192,7 +1192,6 @@ use std::collections::HashMap;
 use machined_config::{RestartPolicy, ServiceConfig};
 use machined_runtime_core::State;
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::process::ProcessRunner;
@@ -1257,7 +1256,6 @@ pub fn start_order(services: &[ServiceConfig]) -> Result<Vec<String>, String> {
 pub struct ServiceManager {
     state: State,
     handles: Vec<(String, JoinHandle<()>)>,
-    shutdown: CancellationToken,
 }
 
 impl ServiceManager {
@@ -1265,7 +1263,6 @@ impl ServiceManager {
         Self {
             state,
             handles: Vec::new(),
-            shutdown: CancellationToken::new(),
         }
     }
 
@@ -1293,9 +1290,10 @@ impl ServiceManager {
         Ok(())
     }
 
-    /// Stop all services in reverse start order, aborting their tasks.
+    /// Stop all services in reverse start order, aborting their tasks. The
+    /// aborted task drops its `ProcessRunner`, whose `kill_on_drop` reaps the
+    /// child process (graceful SIGTERM + grace timeout lands in M5).
     pub async fn stop_all(&mut self) {
-        self.shutdown.cancel();
         while let Some((id, handle)) = self.handles.pop() {
             info!(service = %id, "stopping service");
             handle.abort();
@@ -1376,10 +1374,9 @@ mod tests {
 }
 ```
 
-> **Cargo note:** `manager.rs` uses `machined-config` and `tokio-util`. Add to `crates/supervisor/Cargo.toml` `[dependencies]`:
+> **Cargo note:** `manager.rs` uses `machined-config`. Add to `crates/supervisor/Cargo.toml` `[dependencies]`:
 > ```toml
 > machined-config.workspace = true
-> tokio-util.workspace = true
 > ```
 
 - [ ] **Step 4: Export the new modules**

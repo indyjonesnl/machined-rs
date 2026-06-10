@@ -10,7 +10,6 @@ machined-resources.workspace = true
 machined-runtime-core.workspace = true
 machined-config.workspace = true
 async-trait.workspace = true
-tokio-util.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
