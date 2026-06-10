@@ -8,7 +8,11 @@ use tracing::error;
 
 /// Log a fatal boot error. If `reboot_on_failure` is set, ask the platform to
 /// reboot; otherwise return so the caller can park.
-pub fn enter_emergency(platform: &Arc<dyn Platform>, err: &dyn std::fmt::Display, reboot_on_failure: bool) {
+pub fn enter_emergency(
+    platform: &Arc<dyn Platform>,
+    err: &dyn std::fmt::Display,
+    reboot_on_failure: bool,
+) {
     error!("FATAL during boot: {err}");
     error!("entering emergency state");
     if reboot_on_failure {

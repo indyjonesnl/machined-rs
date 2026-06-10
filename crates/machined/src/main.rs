@@ -80,7 +80,10 @@ async fn run_daemon() -> anyhow::Result<()> {
     let (config, _raw) = match load_from_path(&config_path) {
         Ok(v) => v,
         Err(e) => {
-            info!("no config at {} ({e}); booting with defaults", config_path.display());
+            info!(
+                "no config at {} ({e}); booting with defaults",
+                config_path.display()
+            );
             (Default::default(), String::new())
         }
     };
