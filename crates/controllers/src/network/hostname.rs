@@ -29,7 +29,9 @@ impl Controller for HostnameController {
         vec![Input {
             namespace: NS.to_string(),
             typ: ResourceType::HostnameSpec,
-            kind: InputKind::Strong,
+            // Weak: hostname is applied wholesale from config with no
+            // per-instance teardown, so it does not finalize the spec.
+            kind: InputKind::Weak,
         }]
     }
 

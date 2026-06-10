@@ -32,7 +32,9 @@ impl Controller for ResolverController {
         vec![Input {
             namespace: NS.to_string(),
             typ: ResourceType::ResolverSpec,
-            kind: InputKind::Strong,
+            // Weak: resolv.conf is rewritten wholesale from config with no
+            // per-instance teardown, so it does not finalize the spec.
+            kind: InputKind::Weak,
         }]
     }
 
