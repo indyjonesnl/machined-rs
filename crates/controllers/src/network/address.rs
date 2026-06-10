@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use machined_netlink::NetworkBackend;
+use machined_netlink::{NetlinkError, NetworkBackend};
 use machined_resources::{AddressStatus, Resource, ResourceType};
 use machined_runtime_core::{
     reconcile_finalized, Controller, Input, InputKind, Output, OutputKind, ReconcileCtx,
@@ -86,7 +86,10 @@ impl Controller for AddressController {
                 };
                 async move {
                     let Some(spec) = spec else { return Ok(()) };
-                    let _ = backend.del_address(&spec.link, spec.address).await;
+                    match backend.del_address(&spec.link, spec.address).await {
+                        Ok(()) | Err(NetlinkError::LinkNotFound(_)) => {}
+                        Err(e) => return Err(ctl(e)),
+                    }
                     destroy_status(&state, ResourceType::AddressStatus, &id);
                     Ok(())
                 }

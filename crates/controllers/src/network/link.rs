@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use machined_netlink::NetworkBackend;
+use machined_netlink::{NetlinkError, NetworkBackend};
 use machined_resources::{LinkStatus, Resource, ResourceType};
 use machined_runtime_core::{
     reconcile_finalized, Controller, Input, InputKind, Output, OutputKind, ReconcileCtx,
@@ -100,7 +100,13 @@ impl Controller for LinkController {
                 async move {
                     let Some(spec) = spec else { return Ok(()) };
                     // Best-effort: return the link to down; never delete it.
-                    let _ = backend.set_link_up(&spec.name, false).await;
+                    // A not-found link is already gone (benign); any other
+                    // error is propagated so the finalizer is retained and
+                    // revert retries on the next reconcile.
+                    match backend.set_link_up(&spec.name, false).await {
+                        Ok(()) | Err(NetlinkError::LinkNotFound(_)) => {}
+                        Err(e) => return Err(ctl(e)),
+                    }
                     destroy_status(&state, ResourceType::LinkStatus, &spec.name);
                     Ok(())
                 }
@@ -206,5 +212,80 @@ mod tests {
         assert!(state
             .get(&Key::new(NS, ResourceType::LinkSpec, "eth0"))
             .is_err());
+    }
+
+    struct FailingRevertBackend;
+
+    #[async_trait::async_trait]
+    impl NetworkBackend for FailingRevertBackend {
+        async fn list_links(&self) -> machined_netlink::Result<Vec<machined_netlink::LinkState>> {
+            Ok(vec![])
+        }
+        async fn set_link_up(&self, _: &str, up: bool) -> machined_netlink::Result<()> {
+            if up {
+                Ok(())
+            } else {
+                Err(NetlinkError::Netlink("transient revert failure".into()))
+            }
+        }
+        async fn set_mtu(&self, _: &str, _: u32) -> machined_netlink::Result<()> {
+            Ok(())
+        }
+        async fn list_addresses(
+            &self,
+            _: &str,
+        ) -> machined_netlink::Result<Vec<machined_resources::AddrCidr>> {
+            Ok(vec![])
+        }
+        async fn add_address(
+            &self,
+            _: &str,
+            _: machined_resources::AddrCidr,
+        ) -> machined_netlink::Result<()> {
+            Ok(())
+        }
+        async fn del_address(
+            &self,
+            _: &str,
+            _: machined_resources::AddrCidr,
+        ) -> machined_netlink::Result<()> {
+            Ok(())
+        }
+        async fn add_route(&self, _: &machined_netlink::RouteReq) -> machined_netlink::Result<()> {
+            Ok(())
+        }
+        async fn del_route(&self, _: &machined_netlink::RouteReq) -> machined_netlink::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn revert_error_keeps_finalizer() {
+        let backend = Arc::new(FailingRevertBackend);
+        let state = State::new();
+        reconcile_owned(
+            &state,
+            "network-config",
+            NS,
+            ResourceType::LinkSpec,
+            vec![link_spec("eth0", true, None)],
+        )
+        .unwrap();
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
+        let mut c = LinkController::new(backend.clone());
+        c.reconcile(&ctx).await.unwrap(); // applies + adds finalizer
+
+        // Drop the spec → TearingDown; the revert will fail.
+        reconcile_owned(&state, "network-config", NS, ResourceType::LinkSpec, vec![]).unwrap();
+        let res = c.reconcile(&ctx).await;
+        assert!(res.is_err(), "a failed revert must surface as an error");
+
+        // Finalizer retained so a later reconcile retries the revert.
+        let spec = state
+            .get(&Key::new(NS, ResourceType::LinkSpec, "eth0"))
+            .unwrap();
+        assert!(spec.metadata.finalizers.contains(&FINALIZER.to_string()));
     }
 }
