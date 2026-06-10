@@ -11,6 +11,8 @@ path = "src/main.rs"
 [dependencies]
 machined-common.workspace = true
 machined-config.workspace = true
+machined-controllers.workspace = true
+machined-netlink.workspace = true
 machined-platform.workspace = true
 machined-resources.workspace = true
 machined-runtime-core.workspace = true
