@@ -14,6 +14,13 @@ mod linux {
 
     /// Continuously reap any orphaned children that get reparented to PID 1.
     /// Runs until `shutdown` is cancelled.
+    ///
+    /// Division of labour: this reaper handles *orphans* (processes reparented
+    /// to PID 1 that nothing else waits on). Supervised service children are
+    /// reaped by their own `run()`'s `wait()`, and killed on shutdown via the
+    /// runner's `kill_on_drop`. There is a benign race if a child exits before
+    /// this handler is installed — `reap_all` drains every reapable PID on the
+    /// next SIGCHLD, so such a child is simply reaped slightly later.
     pub fn spawn_reaper(shutdown: CancellationToken) {
         tokio::spawn(async move {
             // SIGCHLD wakes us; we then reap everything reapable.
