@@ -248,7 +248,6 @@ dependencies = [
  "machined-runtime-core",
  "thiserror",
  "tokio",
- "tokio-util",
  "tracing",
 ]
 
