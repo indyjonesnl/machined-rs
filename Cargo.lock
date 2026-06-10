@@ -12,6 +12,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.102"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -154,6 +160,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 
 [[package]]
+name = "machined"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "machined-common",
+ "machined-config",
+ "machined-platform",
+ "machined-resources",
+ "machined-runtime-core",
+ "machined-sequencer",
+ "machined-supervisor",
+ "nix",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "machined-common"
 version = "0.1.0"
 dependencies = [
@@ -194,6 +218,22 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "machined-sequencer"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "machined-common",
+ "machined-config",
+ "machined-platform",
+ "machined-resources",
+ "machined-runtime-core",
+ "machined-supervisor",
+ "thiserror",
+ "tokio",
  "tracing",
 ]
 

@@ -8,7 +8,7 @@ members = [
     "crates/config",
     "crates/supervisor",
     "crates/sequencer",
-    # "crates/machined",   # created in M1 Task 7
+    "crates/machined",
 ]
 
 [workspace.package]
