@@ -1,0 +1,18 @@
+[package]
+name = "machined-controllers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+machined-common.workspace = true
+machined-config.workspace = true
+machined-netlink.workspace = true
+machined-platform.workspace = true
+machined-resources.workspace = true
+machined-runtime-core.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }

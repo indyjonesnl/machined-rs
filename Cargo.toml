@@ -10,6 +10,7 @@ members = [
     "crates/sequencer",
     "crates/machined",
     "crates/netlink",
+    "crates/controllers",
 ]
 
 [workspace.package]
@@ -43,3 +44,4 @@ machined-config = { path = "crates/config" }
 machined-supervisor = { path = "crates/supervisor" }
 machined-sequencer = { path = "crates/sequencer" }
 machined-netlink = { path = "crates/netlink" }
+machined-controllers = { path = "crates/controllers" }

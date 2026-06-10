@@ -248,6 +248,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "machined-controllers"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "machined-common",
+ "machined-config",
+ "machined-netlink",
+ "machined-platform",
+ "machined-resources",
+ "machined-runtime-core",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "machined-netlink"
 version = "0.1.0"
 dependencies = [
