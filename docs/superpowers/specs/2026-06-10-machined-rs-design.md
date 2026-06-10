@@ -8,22 +8,31 @@
 
 `machined-rs` is a clean-break, greenfield Rust reimplementation of the *node-OS half* of
 [Talos Linux's `machined`](https://github.com/siderolabs/talos/tree/main/internal/app/machined).
-It is the PID 1 / init system and machine-management daemon for an immutable Rust node OS whose
-purpose is to boot a node and run [`rusternetes`](../rusternetes) — a from-scratch Rust Kubernetes —
-on top.
+It is the PID 1 / init system and machine-management daemon for a generic, immutable Rust node OS:
+it boots a node, configures it, and supervises whatever **workload payload** the machine config
+declares.
+
+**machined-rs is workload- and distro-agnostic.** Its job ends at "a configured node running an
+external container runtime plus the services config tells it to run." What runs on top — a
+Kubernetes distribution, something else entirely — is a payload choice, not baked into machined-rs.
+[`rusternetes`](../rusternetes) (a from-scratch Rust Kubernetes, SQLite-backed, no etcd) is the
+**motivating first consumer** and the reference payload, but the design must stay equally usable to
+boot a node running k3s, k0s, vanilla kubeadm, or any other distro — anyone should be able to drop
+in their own payload via config.
 
 It is **inspired by** Talos machined, not wire-compatible with it. We are free to redesign the
 machine config format, the management API, and the internal resource model. We are **not** porting
 Talos's Kubernetes-facing machinery (k8s controllers, etcd membership/snapshot, kubespan, siderolink,
-discovery, trustd/apid split). rusternetes replaces all of that and keeps cluster state in SQLite,
-not etcd.
+discovery, trustd/apid split) — a payload owns its own cluster concerns; machined-rs stays out of them.
 
 ### Target environment
 
-The north-star deployment (inherited from rusternetes) is a 4-node cluster of Raspberry Pi 3A+
-boards: 512 MB RAM, quad-core Cortex-A53, USB-ethernet, a single 128 GB micro-SD per node holding
-OS + binary + state. **Footprint discipline is a first-class design constraint**: small RSS, few
-processes, minimal SD write amplification.
+The north-star deployment that motivates the project (inherited from rusternetes) is a 4-node cluster
+of Raspberry Pi 3A+ boards: 512 MB RAM, quad-core Cortex-A53, USB-ethernet, a single 128 GB micro-SD
+per node holding OS + binary + state. That makes **footprint discipline a first-class design
+constraint**: small RSS, few processes, minimal SD write amplification. The daemon itself is not
+ARM- or Pi-specific — that is just the tightest target it must do well on; it should run equally on
+commodity x86 nodes.
 
 ## 2. Goals / Non-goals
 
@@ -33,15 +42,22 @@ processes, minimal SD write amplification.
 - Provide a **generic reconcile runtime** (COSI-like semantics, statically typed) that all
   node subsystems are built on.
 - Drive a **lifecycle sequencer** (boot / reset / upgrade / reboot / shutdown phases).
-- **Supervise services**: an external `containerd` (via CRI) and the `rusternetes` binary, plus
-  internal tasks — with health checks, restart policy, ordered dependency-aware shutdown.
+- **Supervise services**: an external container runtime (`containerd` via CRI) plus
+  **config-declared payload services** and internal tasks — with health checks, restart policy,
+  ordered dependency-aware shutdown. The payload (e.g. a k8s distro) is supervised through the same
+  generic service mechanism, never special-cased.
 - Configure the node: network (netlink), block storage (partition/format/mount the SD), node PKI,
   hostname/DNS, time.
 - Load a **clean-break machine config** and expose it to controllers via a `Provider` trait.
 - Expose a **management gRPC API** (talosctl-equivalent) and a `machinectl` CLI.
+- **Stay workload-/distro-agnostic**: no compile-time dependency on rusternetes or any particular
+  Kubernetes distribution; the payload is selected and parameterized purely through config.
 
 ### Non-goals (for this project / explicitly out of scope)
-- Kubernetes control-plane logic, etcd, kubelet/CRI implementation — those live in rusternetes.
+- Kubernetes control-plane logic, etcd, kubelet/CRI implementation — those belong to the payload
+  (rusternetes, or whatever distro the operator chooses), not to machined-rs.
+- Any rusternetes-specific or distro-specific coupling in core code (SQLite-vs-etcd, k8s API shapes,
+  etc.) — such specifics live in payload config/extensions, not in machined-rs.
 - Wire-compatibility with Talos's machine config, COSI resource format, or `machine.MachineService`.
 - Talos's CEL config validation, version-contract machinery, multidoc config.
 - kubespan / siderolink / discovery / cluster-membership features.
@@ -126,7 +142,9 @@ no reflection).
 ### 3.4 supervisor — service management
 
 - `ServiceManager`: load / start / stop / restart / list services; builds reverse-dependency map for
-  ordered, grace-bounded shutdown; surfaces each service as `Resource::ServiceStatus`.
+  ordered, grace-bounded shutdown; surfaces each service as `Resource::ServiceStatus`. Services are
+  **declared by config** (id, runner backend, dependencies, health), so the payload is just more
+  services — machined-rs has no hardcoded knowledge of rusternetes or any distro.
 - `ServiceRunner`: drives one service through `Pre → wait(Condition) → Run → health` with state
   transitions (Preparing / Running / Finished / Skipped / Failed) and event recording.
 - `trait Runner { open / run / stop / close }` with backends:
@@ -157,8 +175,10 @@ no reflection).
   (discover/partition/format/mount BOOT/STATE/EPHEMERAL), time sync.
 - **M3 — API + secrets:** node PKI (rcgen/rustls), tonic management API
   (version/services/logs/reboot/apply-config), `machinectl`.
-- **M4 — Workload bring-up:** supervise `containerd` via CRI + supervise `rusternetes`;
-  full boot → running rusternetes node.
+- **M4 — Workload bring-up:** supervise `containerd` via CRI + supervise the config-declared payload
+  through the generic service mechanism. Reference/acceptance payload: `rusternetes` (full boot →
+  running rusternetes node), validated as the first consumer without any rusternetes-specific code in
+  core — a second payload (e.g. k3s) should require only config.
 - **M5 — Lifecycle:** reset, A/B image upgrade + kexec, reboot/shutdown, config rollback.
 - **M6 — Hardening:** health/events/watchdog, emergency volume cleanup, multi-node, install image.
 
