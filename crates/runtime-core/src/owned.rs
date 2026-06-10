@@ -24,6 +24,12 @@ pub fn reconcile_owned(
     typ: ResourceType,
     desired: Vec<ResourceObject>,
 ) -> Result<()> {
+    debug_assert!(
+        desired
+            .iter()
+            .all(|o| o.metadata.namespace == namespace && o.metadata.typ == typ),
+        "reconcile_owned: every desired object must match the namespace/typ args"
+    );
     let desired_ids: HashSet<String> = desired.iter().map(|o| o.metadata.id.clone()).collect();
 
     // Upsert desired.
@@ -52,9 +58,8 @@ pub fn reconcile_owned(
             let ready = state.teardown(&key)?;
             if ready {
                 // Re-read for the current version bumped by teardown.
-                if let Ok(cur) = state.get(&key) {
-                    state.destroy(&key, cur.metadata.version)?;
-                }
+                let cur = state.get(&key)?;
+                state.destroy(&key, cur.metadata.version)?;
             }
         }
     }
@@ -66,6 +71,11 @@ pub fn reconcile_owned(
 /// in `Running`, ensures the finalizer is present then calls `apply`; for each
 /// in `TearingDown`, calls `revert` then removes the finalizer (releasing the
 /// resource for destruction).
+///
+/// `apply` and `revert` must be idempotent: after a crash either may be
+/// re-invoked on the next reconcile (the finalizer is added before `apply`
+/// and removed only after `revert` succeeds). Clone what you need out of the
+/// `&ResourceObject` before `.await` — the returned future must not borrow it.
 pub async fn reconcile_finalized<A, R, AFut, RFut>(
     state: &State,
     finalizer: &str,
@@ -112,6 +122,19 @@ mod tests {
                 state: ServiceState::Running,
                 healthy: true,
                 last_message: String::new(),
+            }),
+        )
+    }
+
+    fn svc_with_msg(id: &str, msg: &str) -> ResourceObject {
+        ResourceObject::new(
+            NS,
+            id,
+            Resource::ServiceStatus(ServiceStatusSpec {
+                service_id: id.into(),
+                state: ServiceState::Running,
+                healthy: true,
+                last_message: msg.into(),
             }),
         )
     }
@@ -246,5 +269,99 @@ mod tests {
             .metadata
             .finalizers
             .contains(&"net".to_string()));
+    }
+
+    #[test]
+    fn reconcile_owned_no_op_on_equal_spec() {
+        let state = State::new();
+        reconcile_owned(
+            &state,
+            "ctl",
+            NS,
+            ResourceType::ServiceStatus,
+            vec![svc("a")],
+        )
+        .unwrap();
+        let v1 = state.get(&key("a")).unwrap().metadata.version;
+        reconcile_owned(
+            &state,
+            "ctl",
+            NS,
+            ResourceType::ServiceStatus,
+            vec![svc("a")],
+        )
+        .unwrap();
+        let v2 = state.get(&key("a")).unwrap().metadata.version;
+        assert_eq!(v1, v2, "unchanged desired must not bump version");
+    }
+
+    #[test]
+    fn reconcile_owned_updates_changed_spec() {
+        let state = State::new();
+        reconcile_owned(
+            &state,
+            "ctl",
+            NS,
+            ResourceType::ServiceStatus,
+            vec![svc("a")],
+        )
+        .unwrap();
+        let v1 = state.get(&key("a")).unwrap().metadata.version;
+        reconcile_owned(
+            &state,
+            "ctl",
+            NS,
+            ResourceType::ServiceStatus,
+            vec![svc_with_msg("a", "changed")],
+        )
+        .unwrap();
+        let got = state.get(&key("a")).unwrap();
+        assert!(got.metadata.version > v1, "changed spec must bump version");
+        match got.spec {
+            Resource::ServiceStatus(s) => assert_eq!(s.last_message, "changed"),
+            _ => panic!("wrong type"),
+        }
+    }
+
+    #[test]
+    fn reconcile_owned_leaves_other_owners_and_unowned() {
+        let state = State::new();
+        reconcile_owned(
+            &state,
+            "other",
+            NS,
+            ResourceType::ServiceStatus,
+            vec![svc("x")],
+        )
+        .unwrap();
+        state.create(svc("y")).unwrap(); // unowned
+        reconcile_owned(&state, "ctl", NS, ResourceType::ServiceStatus, vec![]).unwrap();
+        assert!(state.get(&key("x")).is_ok(), "other-owned survives ctl GC");
+        assert!(state.get(&key("y")).is_ok(), "unowned survives ctl GC");
+    }
+
+    #[tokio::test]
+    async fn reconcile_finalized_apply_error_keeps_finalizer() {
+        let state = State::new();
+        state.create(svc("a")).unwrap();
+        let inputs = vec![state.get(&key("a")).unwrap()];
+        let res = reconcile_finalized(
+            &state,
+            "net",
+            &inputs,
+            |_obj| async { Err(crate::error::Error::Controller("boom".into())) },
+            |_obj| async { Ok(()) },
+        )
+        .await;
+        assert!(res.is_err(), "apply error propagates");
+        assert!(
+            state
+                .get(&key("a"))
+                .unwrap()
+                .metadata
+                .finalizers
+                .contains(&"net".to_string()),
+            "finalizer added before apply must remain for retry"
+        );
     }
 }
