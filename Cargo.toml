@@ -29,6 +29,7 @@ anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rtnetlink = "0.14"
+netlink-packet-route = "0.19"
 futures = "0.3"
 
 # internal crates

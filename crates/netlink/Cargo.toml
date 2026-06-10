@@ -12,6 +12,7 @@ tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rtnetlink.workspace = true
+netlink-packet-route.workspace = true
 futures.workspace = true
 tokio.workspace = true
 

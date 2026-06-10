@@ -3,7 +3,8 @@
 //! `rtnetlink` implementation.
 
 pub mod fake;
-// #[cfg(target_os = "linux")] pub mod rtnetlink_backend;  // Task 3
+#[cfg(target_os = "linux")]
+pub mod rtnetlink_backend;
 
 use std::net::IpAddr;
 
@@ -11,7 +12,8 @@ use async_trait::async_trait;
 use machined_resources::AddrCidr;
 
 pub use fake::FakeNetworkBackend;
-// #[cfg(target_os = "linux")] pub use rtnetlink_backend::RtNetlink;  // Task 3
+#[cfg(target_os = "linux")]
+pub use rtnetlink_backend::RtNetlink;
 
 #[derive(thiserror::Error, Debug)]
 pub enum NetlinkError {

@@ -254,6 +254,7 @@ dependencies = [
  "async-trait",
  "futures",
  "machined-resources",
+ "netlink-packet-route",
  "rtnetlink",
  "thiserror 1.0.69",
  "tokio",
