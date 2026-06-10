@@ -41,6 +41,13 @@ impl FakeNetworkBackend {
         );
         self
     }
+
+    /// Inspect the simulated routes. The `NetworkBackend` trait has no
+    /// `list_routes`, so this fake-only accessor lets tests observe applied
+    /// routes.
+    pub fn routes(&self) -> Vec<RouteReq> {
+        self.state.lock().unwrap().routes.clone()
+    }
 }
 
 #[async_trait]
@@ -161,5 +168,22 @@ mod tests {
             be.add_address("ghost", cidr(10, 24)).await,
             Err(NetlinkError::LinkNotFound(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn route_add_del_is_idempotent() {
+        let be = FakeNetworkBackend::new();
+        let r = RouteReq {
+            destination: Some(AddrCidr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 5, 0)), 24)),
+            gateway: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))),
+            link: "eth0".into(),
+            metric: 100,
+        };
+        be.add_route(&r).await.unwrap();
+        be.add_route(&r).await.unwrap(); // dup is a no-op
+        assert_eq!(be.routes().len(), 1);
+        be.del_route(&r).await.unwrap();
+        be.del_route(&r).await.unwrap(); // del-again is a no-op
+        assert!(be.routes().is_empty());
     }
 }
