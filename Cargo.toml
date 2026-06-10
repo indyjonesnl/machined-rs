@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/common",
+    # "crates/resources",   # restored in Task 2
+    # "crates/runtime-core", # restored in Task 2
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# internal crates
+machined-common = { path = "crates/common" }
+machined-resources = { path = "crates/resources" }
+machined-runtime-core = { path = "crates/runtime-core" }
