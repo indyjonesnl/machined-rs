@@ -98,7 +98,7 @@ members = [
 Add to `[workspace.dependencies]`:
 
 ```toml
-nix = { version = "0.29", features = ["mount", "signal", "process", "hostname"] }
+nix = { version = "0.29", features = ["mount", "signal", "process", "hostname", "reboot"] }
 anyhow = "1.0"
 
 # internal crates (added in M1)

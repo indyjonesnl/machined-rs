@@ -884,18 +884,23 @@ impl State {
             .objects
             .get_mut(key)
             .ok_or_else(|| Error::NotFound(key.clone()))?;
+        // Compute the return value before any further use of the broadcast
+        // sender, so the mutable borrow of `obj` ends here.
+        let ready = obj.metadata.finalizers.is_empty();
+        let mut event = None;
         if obj.metadata.phase != Phase::TearingDown {
             obj.metadata.phase = Phase::TearingDown;
             obj.metadata.version += 1;
-            let snapshot = obj.clone();
-            self.emit_locked(&mut inner, EventKind::Updated, snapshot);
+            event = Some(obj.clone());
         }
-        Ok(obj.metadata.finalizers.is_empty())
-    }
-
-    // Helper that emits while already holding the lock by cloning the sender.
-    fn emit_locked(&self, _inner: &mut Inner, kind: EventKind, object: ResourceObject) {
-        let _ = self.tx.send(Event { kind, object });
+        drop(inner);
+        if let Some(object) = event {
+            let _ = self.tx.send(Event {
+                kind: EventKind::Updated,
+                object,
+            });
+        }
+        Ok(ready)
     }
 
     /// Permanently remove a resource. Requires `expected_version` to match and
