@@ -93,7 +93,17 @@ tracing.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 ```
+
+> **Review follow-up (applied):** `NetworkConfigController` declares its five spec outputs **also**
+> as `Weak` inputs (via the shared `spec_types()` helper). Without this, when a spec controller
+> clears its finalizer on a torn-down spec, nothing re-wakes the config controller, so the spec
+> lingers in `TearingDown` until the next config change — the autonomous teardown cascade never
+> closes. Watching the outputs back drives the final GC `destroy`; idempotency prevents self-storm.
+> A live-runtime test `finalizer_clear_triggers_autonomous_gc` (using `tokio-util`'s
+> `CancellationToken`) seeds a finalizer-held torn-down spec, clears the finalizer, and asserts the
+> running controller destroys it.
 
 - [ ] **Step 3: Create the shared network helpers**
 
@@ -164,7 +174,9 @@ use machined_resources::{
     AddrCidr, AddressSpec, HostnameSpec, LinkSpec, ResolverSpec, Resource, ResourceObject,
     ResourceType, RouteSpec,
 };
-use machined_runtime_core::{reconcile_owned, Controller, Input, Output, OutputKind, ReconcileCtx};
+use machined_runtime_core::{
+    reconcile_owned, Controller, Input, InputKind, Output, OutputKind, ReconcileCtx,
+};
 use tracing::warn;
 
 use super::NS;
@@ -187,6 +199,18 @@ fn obj(id: &str, spec: Resource) -> ResourceObject {
     ResourceObject::new(NS, id, spec)
 }
 
+/// The five desired-spec resource types this controller owns.
+fn spec_types() -> impl Iterator<Item = ResourceType> {
+    [
+        ResourceType::LinkSpec,
+        ResourceType::AddressSpec,
+        ResourceType::RouteSpec,
+        ResourceType::HostnameSpec,
+        ResourceType::ResolverSpec,
+    ]
+    .into_iter()
+}
+
 #[async_trait]
 impl Controller for NetworkConfigController {
     fn name(&self) -> &str {
@@ -194,24 +218,28 @@ impl Controller for NetworkConfigController {
     }
 
     fn inputs(&self) -> Vec<Input> {
-        // Static config in M2a: the single startup reconcile produces the specs.
-        Vec::new()
+        // Watch our own outputs (Weak). The startup reconcile produces the
+        // specs from static config; watching them back closes the teardown
+        // cascade: when a spec controller clears its finalizer on a torn-down
+        // spec, the resulting event re-runs this reconcile so the GC pass
+        // observes the spec as ready and destroys it. Idempotency (no-op on
+        // equal spec) keeps this from self-storming.
+        spec_types()
+            .map(|typ| Input {
+                namespace: NS.to_string(),
+                typ,
+                kind: InputKind::Weak,
+            })
+            .collect()
     }
 
     fn outputs(&self) -> Vec<Output> {
-        [
-            ResourceType::LinkSpec,
-            ResourceType::AddressSpec,
-            ResourceType::RouteSpec,
-            ResourceType::HostnameSpec,
-            ResourceType::ResolverSpec,
-        ]
-        .into_iter()
-        .map(|typ| Output {
-            typ,
-            kind: OutputKind::Exclusive,
-        })
-        .collect()
+        spec_types()
+            .map(|typ| Output {
+                typ,
+                kind: OutputKind::Exclusive,
+            })
+            .collect()
     }
 
     async fn reconcile(&mut self, ctx: &ReconcileCtx) -> machined_runtime_core::Result<()> {
