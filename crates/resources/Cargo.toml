@@ -1,0 +1,8 @@
+[package]
+name = "machined-resources"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# No dependencies: this is a pure, I/O-free data model. serde derives are
+# added here only when a subsystem actually needs to (de)serialize a Resource.
