@@ -2,8 +2,8 @@
 resolver = "2"
 members = [
     "crates/common",
-    # "crates/resources",   # restored in Task 2
-    # "crates/runtime-core", # restored in Task 2
+    "crates/resources",
+    # "crates/runtime-core", # restored in Task 3 (crate does not exist yet)
 ]
 
 [workspace.package]

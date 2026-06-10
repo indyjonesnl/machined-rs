@@ -1,0 +1,89 @@
+//! The closed `Resource` enum (typed specs) and `ResourceObject`
+//! (metadata + spec) stored by the runtime.
+
+use crate::metadata::{Metadata, ResourceType};
+
+/// Spec for the loaded machine configuration, surfaced as a resource so
+/// controllers reconcile against it via the normal watch path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MachineConfigSpec {
+    /// Raw single-document YAML the config was parsed from. The typed view
+    /// lives in the `config` crate (added in M1); the store only needs to
+    /// hold and version the document.
+    pub raw_yaml: String,
+}
+
+/// Observed state of a supervised service.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServiceStatusSpec {
+    pub service_id: String,
+    pub state: ServiceState,
+    pub healthy: bool,
+    pub last_message: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceState {
+    Preparing,
+    Running,
+    Finished,
+    Skipped,
+    Failed,
+}
+
+/// The closed set of resource specs. Each variant's payload is its typed spec.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Resource {
+    MachineConfig(MachineConfigSpec),
+    ServiceStatus(ServiceStatusSpec),
+}
+
+impl Resource {
+    /// The `ResourceType` discriminant for this spec.
+    pub fn resource_type(&self) -> ResourceType {
+        match self {
+            Resource::MachineConfig(_) => ResourceType::MachineConfig,
+            Resource::ServiceStatus(_) => ResourceType::ServiceStatus,
+        }
+    }
+}
+
+/// A stored object: identity/lifecycle metadata plus its typed spec.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResourceObject {
+    pub metadata: Metadata,
+    pub spec: Resource,
+}
+
+impl ResourceObject {
+    /// Build a fresh object in namespace `ns` with id `id` from `spec`.
+    /// The metadata's type is taken from the spec, guaranteeing they agree.
+    pub fn new(ns: impl Into<String>, id: impl Into<String>, spec: Resource) -> Self {
+        let typ = spec.resource_type();
+        Self {
+            metadata: Metadata::new(ns, typ, id),
+            spec,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resource_object_type_matches_spec() {
+        let obj = ResourceObject::new(
+            "runtime",
+            "etcd",
+            Resource::ServiceStatus(ServiceStatusSpec {
+                service_id: "etcd".into(),
+                state: ServiceState::Running,
+                healthy: true,
+                last_message: "ok".into(),
+            }),
+        );
+        assert_eq!(obj.metadata.typ, ResourceType::ServiceStatus);
+        assert_eq!(obj.spec.resource_type(), ResourceType::ServiceStatus);
+    }
+}
