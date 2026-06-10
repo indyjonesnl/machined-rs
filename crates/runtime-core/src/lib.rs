@@ -11,6 +11,6 @@ pub mod state;
 pub mod watch;
 
 pub use error::{Error, Result};
-// pub use runtime::{...};  // restored in Task 6
+pub use runtime::{Controller, Input, InputKind, Output, OutputKind, ReconcileCtx, Runtime};
 pub use state::State;
 pub use watch::{Event, EventKind};
