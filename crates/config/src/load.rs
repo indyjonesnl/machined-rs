@@ -60,6 +60,40 @@ machine:
       restart: always
 "#;
 
+    const NET_SAMPLE: &str = r#"
+machine:
+  network:
+    interfaces:
+      - name: eth0
+        mtu: 1500
+        addresses:
+          - 192.168.1.10/24
+        routes:
+          - to: 0.0.0.0/0
+            via: 192.168.1.1
+    nameservers:
+      - 1.1.1.1
+      - 8.8.8.8
+    search:
+      - example.com
+"#;
+
+    #[test]
+    fn parses_network_section() {
+        let cfg = load_from_str(NET_SAMPLE).unwrap();
+        let net = &cfg.machine.network;
+        assert_eq!(net.interfaces.len(), 1);
+        let eth0 = &net.interfaces[0];
+        assert_eq!(eth0.name, "eth0");
+        assert!(eth0.up, "up defaults to true");
+        assert_eq!(eth0.mtu, Some(1500));
+        assert_eq!(eth0.addresses, vec!["192.168.1.10/24".to_string()]);
+        assert_eq!(eth0.routes.len(), 1);
+        assert_eq!(eth0.routes[0].to.as_deref(), Some("0.0.0.0/0"));
+        assert_eq!(net.nameservers.len(), 2);
+        assert_eq!(net.search, vec!["example.com".to_string()]);
+    }
+
     #[test]
     fn parses_machine_config() {
         let cfg = load_from_str(SAMPLE).unwrap();
