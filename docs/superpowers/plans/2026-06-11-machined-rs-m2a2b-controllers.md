@@ -1095,7 +1095,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use machined_platform::Platform;
 use machined_resources::{Resource, ResourceType};
-use machined_runtime_core::{Controller, Input, InputKind, Output, OutputKind, ReconcileCtx};
+use machined_runtime_core::{Controller, Input, InputKind, Output, ReconcileCtx};
 
 use super::{ctl, NS};
 
@@ -1180,7 +1180,7 @@ Create `crates/controllers/src/network/resolver.rs`:
 
 use async_trait::async_trait;
 use machined_resources::{Resource, ResourceType};
-use machined_runtime_core::{Controller, Input, InputKind, Output, OutputKind, ReconcileCtx};
+use machined_runtime_core::{Controller, Input, InputKind, Output, ReconcileCtx};
 
 use super::{ctl, NS};
 
