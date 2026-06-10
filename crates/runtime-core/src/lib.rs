@@ -12,5 +12,5 @@ pub mod watch;
 
 pub use error::{Error, Result};
 // pub use runtime::{...};  // restored in Task 6
-// pub use state::State;    // restored in Task 5
+pub use state::State;
 pub use watch::{Event, EventKind};
