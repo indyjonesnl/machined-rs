@@ -313,10 +313,13 @@ git commit -m "feat(pki): rcgen node CA + server/client certs + NodePki"
 In root `Cargo.toml`, add `"crates/apiserver"` to `members`; add to `[workspace.dependencies]`:
 
 ```toml
-tonic = "0.12"
+# The `tls` feature is REQUIRED for ServerTlsConfig/Server::tls_config (used by
+# serve() here and the mTLS in Task 4); it's gated off by default in tonic 0.12.
+tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 tonic-build = "0.12"
 protoc-bin-vendored = "3"
+tokio-stream = "0.1"      # integration test uses TcpListenerStream
 
 machined-apiserver = { path = "crates/apiserver" }
 ```
