@@ -64,7 +64,7 @@ never renumbers). The wire format must match real containerd.
 ```text
 trait CriClient (Send + Sync):
     async fn version(&self) -> Result<RuntimeVersion>      // { runtime_name, runtime_version }
-    async fn ready(&self) -> Result<bool>                  // Status: RuntimeReady && NetworkReady conds
+    async fn ready(&self) -> Result<bool>                  // Status: the RuntimeReady condition only
 
 GrpcCriClient::connect(socket_path) -> Result<Self>
     // tonic Endpoint::from_static("http://[::]:0").connect_with_connector(service_fn(

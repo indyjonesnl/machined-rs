@@ -53,7 +53,8 @@ impl CriClient for FakeCriClient {
     }
 
     async fn ready(&self) -> Result<bool> {
-        let s = self.state.lock().unwrap();
+        let mut s = self.state.lock().unwrap();
+        s.calls += 1;
         if s.version.is_none() {
             return Err(CriError::Connect("unreachable".into()));
         }
@@ -72,7 +73,7 @@ mod tests {
             .with_ready(true);
         assert_eq!(f.version().await.unwrap().runtime_name, "containerd");
         assert!(f.ready().await.unwrap());
-        assert_eq!(f.calls(), 1);
+        assert_eq!(f.calls(), 2); // both version() and ready() count
 
         let unreachable = FakeCriClient::new();
         assert!(unreachable.version().await.is_err());

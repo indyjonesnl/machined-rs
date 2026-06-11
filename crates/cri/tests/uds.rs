@@ -90,7 +90,11 @@ async fn not_ready_when_runtime_condition_false() {
 #[tokio::test]
 async fn missing_socket_is_a_connect_error() {
     let client = GrpcCriClient::new("/no/such/cri.sock");
-    assert!(client.version().await.is_err());
+    // The variant matters: the controller treats Connect as transient-unreachable.
+    assert!(matches!(
+        client.version().await,
+        Err(machined_cri::CriError::Connect(_))
+    ));
 }
 
 #[tokio::test]
