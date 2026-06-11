@@ -263,7 +263,11 @@ impl BlockProvisioner for SysfsBlock {
                 PartType::EfiSystem => gpt::partition_types::EFI,
                 PartType::LinuxFilesystem => gpt::partition_types::LINUX_FS,
             };
-            // size 0 → use the rest: the largest free run, in bytes.
+            // size 0 → use the rest: the largest free run, in bytes. INVARIANT:
+            // a size-0 entry must be the LAST partition in the plan — it claims
+            // all remaining free space, so any partition after it would starve
+            // (and a 0-byte add_partition would error). fixed_layout() upholds
+            // this (only EPHEMERAL is size 0).
             let size = if p.size_bytes == 0 {
                 let free_lba = gdisk
                     .find_free_sectors()
