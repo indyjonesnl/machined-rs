@@ -132,6 +132,11 @@ impl ServiceManager {
 
     /// Stop all services in reverse start order: stop-intent → SIGTERM →
     /// grace-bounded drain → abort (kill_on_drop SIGKILLs).
+    ///
+    /// Bounded race: if the supervised task is between attempts when the
+    /// intent lands (pid slot empty), the SIGTERM is skipped and one final
+    /// child may spawn; it either exits within the grace or is SIGKILLed at
+    /// expiry. The loop re-checks the intent, so no restart follows.
     pub async fn stop_all(&mut self) {
         while let Some(mut h) = self.handles.pop() {
             h.stop.store(true, Ordering::SeqCst);
@@ -149,11 +154,26 @@ impl ServiceManager {
                 }
             }
             match tokio::time::timeout(h.grace, &mut h.join).await {
-                Ok(_) => info!(service = %h.id, "service drained"),
+                Ok(join) => {
+                    if join.is_err() {
+                        warn!(service = %h.id, "supervision task panicked during stop");
+                    } else {
+                        info!(service = %h.id, "service drained");
+                    }
+                }
                 Err(_) => {
                     warn!(service = %h.id, "grace expired; killing");
                     h.join.abort();
                     let _ = h.join.await;
+                    // The aborted task can't publish its own final status —
+                    // record the kill so stop progress stays observable.
+                    crate::service::publish_status(
+                        &self.state,
+                        &h.id,
+                        machined_resources::ServiceState::Failed,
+                        false,
+                        "killed after stop grace expired",
+                    );
                 }
             }
         }
@@ -317,6 +337,15 @@ mod tests {
             took >= Duration::from_millis(900) && took < Duration::from_secs(5),
             "killed at ~grace: {took:?}"
         );
+        // The kill is observable: status records the forced stop.
+        let k = Key::new("runtime", ResourceType::ServiceStatus, "stubborn");
+        match state.get(&k).unwrap().spec {
+            Resource::ServiceStatus(s) => {
+                assert_eq!(s.state, ServiceState::Failed);
+                assert!(s.last_message.contains("killed"));
+            }
+            _ => panic!(),
+        }
     }
 
     #[tokio::test]

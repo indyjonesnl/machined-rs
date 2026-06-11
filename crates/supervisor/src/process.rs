@@ -49,7 +49,7 @@ impl Runner for ProcessRunner {
             .args(args)
             // Kill the child if its task is aborted/dropped, so shutdown
             // (which aborts the supervising task) does not orphan the process
-            // onto PID 1. Graceful SIGTERM + grace timeout lands in M5.
+            // onto PID 1; the manager delivers SIGTERM + grace before that kill.
             .kill_on_drop(true)
             .spawn()
             .map_err(|source| RunnerError::Spawn {
@@ -79,7 +79,7 @@ impl Runner for ProcessRunner {
     async fn stop(&mut self) -> crate::runner::Result<()> {
         if let Some(child) = self.child.as_mut() {
             // tokio's start_kill sends SIGKILL; for M1 that is acceptable.
-            // M5 replaces this with SIGTERM + grace timeout + SIGKILL.
+            // Direct kill; the graceful path lives in ServiceManager::stop_all.
             if let Err(e) = child.start_kill() {
                 warn!(service = %self.id, "kill failed: {e}");
             }
