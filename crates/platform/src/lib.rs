@@ -58,6 +58,8 @@ pub trait Platform: Send + Sync {
     fn set_sysctl(&self, key: &str, value: &str) -> Result<()>;
     fn set_hostname(&self, name: &str) -> Result<()>;
     fn kernel_cmdline(&self) -> Result<String>;
+    /// Whether something is currently mounted at `target`.
+    fn is_mounted(&self, target: &str) -> Result<bool>;
     fn reboot(&self) -> Result<()>;
     fn poweroff(&self) -> Result<()>;
 
