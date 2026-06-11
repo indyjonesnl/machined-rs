@@ -103,6 +103,32 @@ mod tests {
     use machined_resources::VolumeStatus;
     use machined_runtime_core::{ReconcileCtx, State};
 
+    #[tokio::test]
+    async fn skips_already_mounted_target() {
+        let platform = Arc::new(FakePlatform::new());
+        // /var is already mounted (e.g. from a prior boot) before we reconcile.
+        platform
+            .mount(&MountSpec {
+                source: "/dev/other".into(),
+                target: "/var".into(),
+                fstype: "ext4".into(),
+                flags: 0,
+                data: None,
+            })
+            .unwrap();
+        let state = State::new();
+        seed_volume(&state, "EPHEMERAL", VolumePhase::Provisioned); // maps to /var
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
+        let mut c = VolumeMountController::new(platform.clone());
+        c.reconcile(&ctx).await.unwrap();
+
+        // No NEW mount issued (still just the pre-existing one); MountStatus published.
+        assert_eq!(platform.recorded.lock().unwrap().mounts.len(), 1);
+        assert_eq!(state.list(NS, ResourceType::MountStatus).len(), 1);
+    }
+
     fn seed_volume(state: &State, label: &str, phase: VolumePhase) {
         state
             .create(ResourceObject::new(
