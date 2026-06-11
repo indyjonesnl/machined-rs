@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use machined_common::init_logging;
 use machined_config::{load::load_from_path, Provider};
-use machined_controllers::block::{DiskDiscoveryController, VolumeProvisionerController};
+use machined_controllers::block::{
+    DiskDiscoveryController, VolumeMountController, VolumeProvisionerController,
+};
 use machined_controllers::network::{
     AddressController, HostnameController, LinkController, NetworkConfigController,
     ResolverController, RouteController,
@@ -143,6 +145,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         block,
         provider.clone(),
     )));
+    runtime.register(Box::new(VolumeMountController::new(platform.clone())));
 
     let rt_token = shutdown.clone();
     let rt_handle = tokio::spawn(async move {
