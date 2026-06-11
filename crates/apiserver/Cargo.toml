@@ -1,0 +1,22 @@
+[package]
+name = "machined-apiserver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+machined-resources.workspace = true
+machined-runtime-core.workspace = true
+machined-pki.workspace = true
+tonic.workspace = true
+prost.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true
+protoc-bin-vendored.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+tokio-stream = { workspace = true }

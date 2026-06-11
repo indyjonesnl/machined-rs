@@ -13,6 +13,8 @@ members = [
     "crates/controllers",
     "crates/block",
     "crates/time",
+    "crates/pki",
+    "crates/apiserver",
 ]
 
 [workspace.package]
@@ -35,6 +37,14 @@ rtnetlink = "0.14"
 netlink-packet-route = "0.19"
 futures = "0.3"
 gpt = "3.1"
+# rcgen 0.13.2: x509-parser feature is required for CertificateParams::from_ca_cert_pem
+# (gated behind cfg(all(feature = "pem", feature = "x509-parser")); not a default feature).
+rcgen = { version = "0.13", features = ["x509-parser"] }
+tonic = { version = "0.12", features = ["tls"] }
+prost = "0.13"
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
+tokio-stream = "0.1"
 
 # internal crates
 machined-common = { path = "crates/common" }
@@ -50,3 +60,5 @@ machined-netlink = { path = "crates/netlink" }
 machined-controllers = { path = "crates/controllers" }
 machined-block = { path = "crates/block" }
 machined-time = { path = "crates/time" }
+machined-pki = { path = "crates/pki" }
+machined-apiserver = { path = "crates/apiserver" }

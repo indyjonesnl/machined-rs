@@ -1,0 +1,24 @@
+syntax = "proto3";
+package machine;
+
+service MachineService {
+  rpc Version(Empty) returns (VersionResponse);
+  rpc ListResources(ListResourcesRequest) returns (ListResourcesResponse);
+}
+
+message Empty {}
+message VersionResponse { string version = 1; }
+
+message ListResourcesRequest {
+  string namespace = 1;
+  string type = 2;
+}
+message KeyValue {
+  string key = 1;
+  string value = 2;
+}
+message ResourceEntry {
+  string id = 1;
+  repeated KeyValue fields = 2;
+}
+message ListResourcesResponse { repeated ResourceEntry entries = 1; }
