@@ -308,9 +308,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use machined_platform::{MountSpec, Platform};
-use machined_resources::{
-    MountStatus, Resource, ResourceObject, ResourceType, VolumePhase, VolumeStatus,
-};
+use machined_resources::{MountStatus, Resource, ResourceObject, ResourceType, VolumePhase};
 use machined_runtime_core::{
     reconcile_owned, Controller, Input, InputKind, Output, OutputKind, ReconcileCtx,
 };
