@@ -159,6 +159,10 @@ mod tests {
         }
     }
 
+    // Exercises reconcile_owned's GC machinery across two manual reconcile
+    // passes. NOTE: at runtime this controller has `inputs=[]` and reconciles
+    // only once at boot, so a device disappearing live is not GC'd until a
+    // re-trigger exists — hotplug/udev refresh is a documented M2b-2 deferral.
     #[tokio::test]
     async fn gcs_disappeared_devices() {
         let state = State::new();
