@@ -218,6 +218,8 @@ dependencies = [
  "anyhow",
  "machined-common",
  "machined-config",
+ "machined-controllers",
+ "machined-netlink",
  "machined-platform",
  "machined-resources",
  "machined-runtime-core",
@@ -259,6 +261,7 @@ dependencies = [
  "machined-resources",
  "machined-runtime-core",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
