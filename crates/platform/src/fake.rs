@@ -7,6 +7,8 @@ use crate::{MountSpec, Platform, Result};
 #[derive(Debug, Default)]
 pub struct Recorded {
     pub mounts: Vec<MountSpec>,
+    pub unmounts: Vec<String>,
+    pub syncs: u32,
     pub sysctls: Vec<(String, String)>,
     pub hostname: Option<String>,
     pub rebooted: bool,
@@ -57,6 +59,15 @@ impl Platform for FakePlatform {
             .iter()
             .any(|m| m.target == target))
     }
+    fn unmount(&self, target: &str) -> Result<()> {
+        let mut rec = self.recorded.lock().unwrap();
+        rec.mounts.retain(|m| m.target != target);
+        rec.unmounts.push(target.to_string());
+        Ok(())
+    }
+    fn sync(&self) {
+        self.recorded.lock().unwrap().syncs += 1;
+    }
     fn reboot(&self) -> Result<()> {
         self.recorded.lock().unwrap().rebooted = true;
         Ok(())
@@ -99,5 +110,25 @@ mod tests {
         .unwrap();
         assert!(p.is_mounted("/var").unwrap());
         assert!(!p.is_mounted("/boot").unwrap());
+    }
+
+    #[test]
+    fn fake_unmount_flips_is_mounted_and_records() {
+        let p = FakePlatform::new();
+        p.mount(&MountSpec {
+            source: "/dev/x".into(),
+            target: "/var".into(),
+            fstype: "ext4".into(),
+            flags: 0,
+            data: None,
+        })
+        .unwrap();
+        assert!(p.is_mounted("/var").unwrap());
+        p.sync();
+        p.unmount("/var").unwrap();
+        assert!(!p.is_mounted("/var").unwrap());
+        let rec = p.recorded.lock().unwrap();
+        assert_eq!(rec.unmounts, vec!["/var"]);
+        assert_eq!(rec.syncs, 1);
     }
 }
