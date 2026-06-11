@@ -18,6 +18,7 @@ use machined_controllers::network::{
     AddressController, HostnameController, LinkController, NetworkConfigController,
     ResolverController, RouteController,
 };
+use machined_controllers::runtime::RuntimeHealthController;
 use machined_controllers::time::TimeSyncController;
 use machined_pki::NodePki;
 use machined_platform::Platform;
@@ -78,6 +79,10 @@ fn build_block_backend_for_discovery() -> Arc<dyn machined_block::BlockBackend> 
     {
         Arc::new(machined_block::FakeBlockBackend::new())
     }
+}
+
+fn build_cri(socket: &str) -> Arc<dyn machined_cri::CriClient> {
+    Arc::new(machined_cri::GrpcCriClient::new(socket))
 }
 
 fn build_time_sync() -> Arc<dyn machined_time::TimeSync> {
@@ -190,6 +195,11 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     runtime.register(Box::new(TimeSyncController::new(
         build_time_sync(),
+        provider.clone(),
+    )));
+
+    runtime.register(Box::new(RuntimeHealthController::new(
+        build_cri(&provider.runtime().socket),
         provider.clone(),
     )));
 
