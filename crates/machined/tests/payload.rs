@@ -68,6 +68,20 @@ async fn wait_for(state: &State, id: &str, want: ServiceState, budget_ms: u64) -
     false
 }
 
+/// Wait until the service reaches ANY of `want` (one budget, no dead-wait when
+/// a short-lived command races past a single state).
+async fn wait_for_any(state: &State, id: &str, want: &[ServiceState], budget_ms: u64) -> bool {
+    for _ in 0..(budget_ms / 20) {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        if let Some(s) = svc_state(state, id) {
+            if want.contains(&s) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[tokio::test]
 async fn payload_waits_for_cri_then_starts() {
     let state = State::new();
@@ -143,9 +157,59 @@ async fn payload_waits_for_cri_then_starts() {
     publish_runtime_status(&state, true);
 
     // The payload now starts and finishes (command `true` → Finished).
-    let started = wait_for(&state, "payload", ServiceState::Running, 5000).await
-        || wait_for(&state, "payload", ServiceState::Finished, 5000).await;
+    let started = wait_for_any(
+        &state,
+        "payload",
+        &[ServiceState::Running, ServiceState::Finished],
+        5000,
+    )
+    .await;
     assert!(started, "payload must start once CRI is ready");
 
     mgr.stop_all().await;
+}
+
+#[tokio::test]
+async fn stop_all_while_waiting_is_clean() {
+    // A service stuck Waiting (dep never ready) is aborted cleanly by stop_all.
+    let state = State::new();
+    let services = vec![ServiceConfig {
+        id: "stuck".into(),
+        command: vec!["true".into()],
+        depends_on: vec!["never-ready".into()],
+        restart: RestartPolicy::Never,
+    }];
+    // The dep must be DETERMINISTICALLY never-ready. A fast-failing command
+    // (e.g. `false`) briefly publishes Running+healthy before exiting, and the
+    // dependent's readiness check can race into that window (pre-existing M1
+    // semantics; per-service probes are a later milestone). A binary that fails
+    // to spawn at all never reaches Running.
+    let services = {
+        let mut s = services;
+        s.insert(
+            0,
+            ServiceConfig {
+                id: "never-ready".into(),
+                command: vec!["/nonexistent-machined-test-binary".into()],
+                depends_on: vec![],
+                restart: RestartPolicy::Never,
+            },
+        );
+        s
+    };
+
+    let mut mgr = ServiceManager::new(state.clone());
+    mgr.start_all(&services, Arc::new(DefaultReadiness))
+        .unwrap();
+
+    // The dependent parks in Waiting.
+    assert!(
+        wait_for(&state, "stuck", ServiceState::Waiting, 3000).await,
+        "dependent should be Waiting on the failed dep"
+    );
+
+    // stop_all must return promptly (aborting the parked task) — bound it.
+    tokio::time::timeout(Duration::from_secs(5), mgr.stop_all())
+        .await
+        .expect("stop_all must not hang on a Waiting service");
 }
