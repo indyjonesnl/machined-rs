@@ -221,14 +221,19 @@ pub use types::{
 };
 ```
 
+- [ ] **Step 4b: Update existing `MachineSection { ... }` literals (the new field breaks them)**
+
+Adding the `install` field makes every explicit `MachineSection { ... }` struct literal non-exhaustive (E0063). Four test/seed sites from M1/M2a construct it fully — add `install: None,` to the `MachineSection { ... }` literal (after the `network:` field) in: `crates/sequencer/src/boot.rs`, `crates/machined/tests/boot_harness.rs`, `crates/machined/tests/network.rs`, and `crates/controllers/src/network/config_controller.rs` (the `provider()` helper). Run `cargo build --workspace` to confirm.
+
 - [ ] **Step 5: Test + clippy + commit**
 
 Run: `cargo test -p machined-config` → existing + 2 install tests pass.
-Run: `cargo clippy -p machined-config --all-targets -- -D warnings` → clean.
+Run: `cargo build --workspace` → PASS (the 4 literals updated above).
+Run: `cargo clippy --all-targets --all-features -- -D warnings` → clean.
 Run: `cargo fmt --all -- --check` → clean.
 
 ```bash
-git add crates/config
+git add crates/config crates/sequencer crates/controllers crates/machined
 git commit -m "feat(config): install section (disk + wipe)"
 ```
 
