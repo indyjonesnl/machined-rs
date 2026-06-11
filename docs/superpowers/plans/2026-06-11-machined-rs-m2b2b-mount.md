@@ -474,6 +474,11 @@ mod tests {
 
 > The test reads `platform.recorded` directly — `FakePlatform.recorded` is `pub` (used the same way
 > in the sequencer tests), so this works without new accessors.
+>
+> **Review follow-up (applied):** add a `skips_already_mounted_target` test — pre-`mount` `/var` on
+> the fake before reconciling, seed a Provisioned `EPHEMERAL` (maps to `/var`), and assert the
+> controller issues NO new mount (still 1 recorded) but still publishes `MountStatus`. This proves the
+> externally-already-mounted skip path directly, not just the self-mount idempotency path.
 
 - [ ] **Step 2: Wire the module**
 
