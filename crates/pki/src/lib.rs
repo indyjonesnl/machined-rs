@@ -102,6 +102,23 @@ fn write(path: &Path, data: &str) -> Result<()> {
     })
 }
 
+/// Write a private key, restricting it to owner read/write (0600) on Unix so the
+/// CA/server private keys are never world-readable.
+fn write_key(path: &Path, data: &str) -> Result<()> {
+    write(path, data)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|source| {
+            PkiError::Io {
+                path: path.to_string_lossy().to_string(),
+                source,
+            }
+        })?;
+    }
+    Ok(())
+}
+
 impl NodePki {
     /// Load the CA + server identity from `dir`, generating + persisting them if
     /// absent. Idempotent: a second call with the same dir loads the same CA.
@@ -131,9 +148,9 @@ impl NodePki {
         let ca = generate_ca()?;
         let server = generate_cert(&ca, server_cn, CertRole::Server, server_sans)?;
         write(&cap, &ca.cert_pem)?;
-        write(&cak, &ca.key_pem)?;
+        write_key(&cak, &ca.key_pem)?;
         write(&sp, &server.cert_pem)?;
-        write(&sk, &server.key_pem)?;
+        write_key(&sk, &server.key_pem)?;
         Ok(Self { ca, server })
     }
 
@@ -179,6 +196,23 @@ mod tests {
         let p2 = NodePki::load_or_generate(&dir, "node", &["127.0.0.1".into()]).unwrap();
         // Second call loads the same CA, not a fresh one.
         assert_eq!(p1.ca_pem(), p2.ca_pem());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_key_files_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mnd-pki-perm-{}", std::process::id()));
+        NodePki::load_or_generate(&dir, "node", &["127.0.0.1".into()]).unwrap();
+        for key in ["ca.key", "server.key"] {
+            let mode = std::fs::metadata(dir.join(key))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "{key} must be 0600");
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 }
