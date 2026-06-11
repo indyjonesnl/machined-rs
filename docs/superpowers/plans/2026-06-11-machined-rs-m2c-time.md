@@ -397,7 +397,9 @@ git commit -m "feat(resources,config): TimeStatus + time config section"
 - [ ] **Step 1: Add the crate to the workspace**
 
 In root `Cargo.toml`, add `"crates/time"` to `members` and add `machined-time = { path = "crates/time" }`
-to `[workspace.dependencies]`.
+to `[workspace.dependencies]`. Also add `"time"` to the workspace `nix` features (CONFIRMED needed —
+`nix::time` is gated behind it): `nix = { version = "0.29", features = ["mount", "signal", "process",
+"hostname", "reboot", "ioctl", "time"] }`.
 
 - [ ] **Step 2: Create the manifest**
 
@@ -413,15 +415,14 @@ license.workspace = true
 [dependencies]
 async-trait.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 tokio.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nix.workspace = true
-
-[dev-dependencies]
-tokio = { workspace = true }
 ```
+
+> `tokio` (workspace `features=["full"]`) covers both the lib UDP use and the tests, so no separate
+> `[dev-dependencies]` tokio is needed; the crate uses no `tracing`.
 
 - [ ] **Step 3: Write the pure SNTP helpers with tests**
 
