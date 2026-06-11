@@ -179,6 +179,161 @@ impl BlockBackend for SysfsBlock {
     }
 }
 
+use crate::{BlockProvisioner, FsType, PartType, PartitionPlan};
+
+impl SysfsBlock {
+    fn disk_path(&self, disk: &str) -> PathBuf {
+        // Accept either a bare name ("sda") or a full path ("/dev/sda").
+        if disk.starts_with('/') {
+            PathBuf::from(disk)
+        } else {
+            self.dev_root.join(disk)
+        }
+    }
+}
+
+/// Trigger a kernel partition-table re-read so partition device nodes appear.
+fn reread_partition_table(path: &Path) -> Result<()> {
+    // BLKRRPART ioctl: _IO(0x12, 95). Takes no argument; asks the kernel to
+    // re-read the partition table of the block device behind `fd`.
+    nix::ioctl_none!(blkrrpart, 0x12, 95);
+    let f = fs::File::open(path).map_err(|source| BlockError::Io {
+        path: path.to_string_lossy().to_string(),
+        source,
+    })?;
+    use std::os::fd::AsRawFd;
+    // SAFETY: BLKRRPART takes no argument and only asks the kernel to re-read
+    // the partition table of the open block device.
+    let res = unsafe { blkrrpart(f.as_raw_fd()) };
+    res.map(|_| ()).map_err(|e| BlockError::Wipe {
+        disk: path.to_string_lossy().to_string(),
+        message: format!("BLKRRPART: {e}"),
+    })
+}
+
+#[async_trait]
+impl BlockProvisioner for SysfsBlock {
+    async fn wipe(&self, disk: &str) -> Result<()> {
+        use std::io::{Seek, SeekFrom, Write};
+        let path = self.disk_path(disk);
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .map_err(|source| BlockError::Io {
+                path: path.to_string_lossy().to_string(),
+                source,
+            })?;
+        // Zero the first and last 1 MiB (primary + backup GPT live there).
+        let zeros = vec![0u8; 1024 * 1024];
+        f.write_all(&zeros).map_err(|e| BlockError::Wipe {
+            disk: path.to_string_lossy().to_string(),
+            message: e.to_string(),
+        })?;
+        if let Ok(len) = f.seek(SeekFrom::End(0)) {
+            if len > zeros.len() as u64 {
+                let _ = f.seek(SeekFrom::End(-(zeros.len() as i64)));
+                let _ = f.write_all(&zeros);
+            }
+        }
+        f.flush().ok();
+        let _ = reread_partition_table(&path);
+        Ok(())
+    }
+
+    async fn create_partitions(&self, disk: &str, plan: &[PartitionPlan]) -> Result<Vec<String>> {
+        let path = self.disk_path(disk);
+        let device = path.to_string_lossy().to_string();
+        let mut gdisk = gpt::GptConfig::new()
+            .writable(true)
+            .initialized(false)
+            .open(&path)
+            .map_err(|e| BlockError::Gpt {
+                device: device.clone(),
+                message: e.to_string(),
+            })?;
+        gdisk
+            .update_partitions(std::collections::BTreeMap::new())
+            .map_err(|e| BlockError::Gpt {
+                device: device.clone(),
+                message: e.to_string(),
+            })?;
+        let lb = u64::from(*gdisk.logical_block_size());
+        for p in plan {
+            let ptype = match p.part_type {
+                PartType::EfiSystem => gpt::partition_types::EFI,
+                PartType::LinuxFilesystem => gpt::partition_types::LINUX_FS,
+            };
+            // size 0 → use the rest: the largest free run, in bytes.
+            let size = if p.size_bytes == 0 {
+                let free_lba = gdisk
+                    .find_free_sectors()
+                    .into_iter()
+                    .map(|(_, len)| len)
+                    .max()
+                    .unwrap_or(0);
+                free_lba.saturating_mul(lb)
+            } else {
+                p.size_bytes
+            };
+            gdisk
+                .add_partition(&p.label, size, ptype, 0, None)
+                .map_err(|e| BlockError::Gpt {
+                    device: device.clone(),
+                    message: e.to_string(),
+                })?;
+        }
+        gdisk.write().map_err(|e| BlockError::Gpt {
+            device: device.clone(),
+            message: e.to_string(),
+        })?;
+
+        // Re-read so partition nodes appear, then derive their paths.
+        let _ = reread_partition_table(&path);
+        let disk_name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| disk.to_string());
+        Ok((1..=plan.len())
+            .map(|n| {
+                self.dev_root
+                    .join(part_device(&disk_name, n as u32))
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect())
+    }
+
+    async fn format(&self, device: &str, fs: FsType, label: &str) -> Result<()> {
+        let (prog, args): (&str, Vec<String>) = match fs {
+            FsType::Ext4 => (
+                "mkfs.ext4",
+                vec!["-F".into(), "-L".into(), label.into(), device.into()],
+            ),
+            FsType::Vfat => ("mkfs.vfat", vec!["-n".into(), label.into(), device.into()]),
+            FsType::Xfs => (
+                "mkfs.xfs",
+                vec!["-f".into(), "-L".into(), label.into(), device.into()],
+            ),
+            FsType::Swap => ("mkswap", vec!["-L".into(), label.into(), device.into()]),
+        };
+        let status = tokio::process::Command::new(prog)
+            .args(&args)
+            .status()
+            .await
+            .map_err(|e| BlockError::Mkfs {
+                device: device.to_string(),
+                message: format!("{prog}: {e}"),
+            })?;
+        if !status.success() {
+            return Err(BlockError::Mkfs {
+                device: device.to_string(),
+                message: format!("{prog} exited {status}"),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
