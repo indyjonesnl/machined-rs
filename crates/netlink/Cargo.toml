@@ -1,0 +1,20 @@
+[package]
+name = "machined-netlink"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+machined-resources.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rtnetlink.workspace = true
+netlink-packet-route.workspace = true
+futures.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }

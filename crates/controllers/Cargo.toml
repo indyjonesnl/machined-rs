@@ -1,27 +1,19 @@
 [package]
-name = "machined"
+name = "machined-controllers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[[bin]]
-name = "machined"
-path = "src/main.rs"
-
 [dependencies]
 machined-common.workspace = true
 machined-config.workspace = true
-machined-controllers.workspace = true
 machined-netlink.workspace = true
 machined-platform.workspace = true
 machined-resources.workspace = true
 machined-runtime-core.workspace = true
-machined-sequencer.workspace = true
-machined-supervisor.workspace = true
-anyhow.workspace = true
-tokio.workspace = true
-tokio-util.workspace = true
+async-trait.workspace = true
 tracing.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
-nix.workspace = true
+[dev-dependencies]
+tokio = { workspace = true }
+tokio-util = { workspace = true }

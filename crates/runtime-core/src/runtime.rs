@@ -50,6 +50,19 @@ pub struct ReconcileCtx {
     pub state: State,
 }
 
+impl ReconcileCtx {
+    /// Create a resource stamped as owned by `owner`. The owner is recorded in
+    /// metadata so `reconcile_owned` can later garbage-collect it.
+    pub fn create_owned(
+        &self,
+        owner: &str,
+        mut object: machined_resources::ResourceObject,
+    ) -> crate::error::Result<()> {
+        object.metadata.owner = Some(owner.to_string());
+        self.state.create(object)
+    }
+}
+
 /// A single-purpose reconciler. `reconcile` is called once at startup and
 /// again whenever any declared input changes.
 #[async_trait]

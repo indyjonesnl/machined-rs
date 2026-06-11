@@ -8,6 +8,10 @@ use std::sync::Arc;
 
 use machined_common::init_logging;
 use machined_config::{load::load_from_path, Provider};
+use machined_controllers::network::{
+    AddressController, HostnameController, LinkController, NetworkConfigController,
+    ResolverController, RouteController,
+};
 use machined_platform::Platform;
 use machined_runtime_core::Runtime;
 use machined_sequencer::{boot_sequence, shutdown_sequence, SequencerCtx};
@@ -26,6 +30,23 @@ fn build_platform() -> Arc<dyn Platform> {
     #[cfg(not(target_os = "linux"))]
     {
         Arc::new(machined_platform::FakePlatform::new())
+    }
+}
+
+fn build_network_backend() -> Arc<dyn machined_netlink::NetworkBackend> {
+    #[cfg(target_os = "linux")]
+    {
+        match machined_netlink::RtNetlink::new() {
+            Ok(b) => Arc::new(b),
+            Err(e) => {
+                error!("failed to open netlink ({e}); using inert fake backend");
+                Arc::new(machined_netlink::FakeNetworkBackend::new())
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Arc::new(machined_netlink::FakeNetworkBackend::new())
     }
 }
 
@@ -60,22 +81,8 @@ async fn run_daemon() -> anyhow::Result<()> {
     // PID-1 duties.
     pid1::spawn_reaper(shutdown.clone());
 
-    // Build the shared runtime + service manager.
-    let runtime = Runtime::new();
-    let state = runtime.state();
-    let services = Arc::new(Mutex::new(ServiceManager::new(state.clone())));
-
-    // Spawn the reconcile runtime (no controllers in M1; the loop is live and
-    // ready for M2 controllers).
-    let rt_token = shutdown.clone();
-    let rt_handle = tokio::spawn(async move {
-        if let Err(e) = runtime.run(rt_token).await {
-            error!("runtime error: {e}");
-        }
-    });
-
-    // Load config (fall back to an empty config if the file is absent, so a
-    // bare boot still comes up).
+    // Load config first so the controllers can be built from it (fall back to
+    // an empty config if the file is absent, so a bare boot still comes up).
     let config_path = PathBuf::from(DEFAULT_CONFIG_PATH);
     let (config, _raw) = match load_from_path(&config_path) {
         Ok(v) => v,
@@ -88,6 +95,27 @@ async fn run_daemon() -> anyhow::Result<()> {
         }
     };
     let provider = Provider::new(config);
+
+    // Build the shared runtime + service manager, registering the network
+    // controllers so the node configures its network from config.
+    let mut runtime = Runtime::new();
+    let state = runtime.state();
+    let services = Arc::new(Mutex::new(ServiceManager::new(state.clone())));
+
+    let net_backend = build_network_backend();
+    runtime.register(Box::new(NetworkConfigController::new(provider.clone())));
+    runtime.register(Box::new(LinkController::new(net_backend.clone())));
+    runtime.register(Box::new(AddressController::new(net_backend.clone())));
+    runtime.register(Box::new(RouteController::new(net_backend.clone())));
+    runtime.register(Box::new(HostnameController::new(platform.clone())));
+    runtime.register(Box::new(ResolverController::at_etc()));
+
+    let rt_token = shutdown.clone();
+    let rt_handle = tokio::spawn(async move {
+        if let Err(e) = runtime.run(rt_token).await {
+            error!("runtime error: {e}");
+        }
+    });
 
     let ctx = SequencerCtx {
         state,

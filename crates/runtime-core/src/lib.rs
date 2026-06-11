@@ -6,11 +6,13 @@
 //! registered [`Controller`].
 
 pub mod error;
+pub mod owned;
 pub mod runtime;
 pub mod state;
 pub mod watch;
 
 pub use error::{Error, Result};
+pub use owned::{reconcile_finalized, reconcile_owned};
 pub use runtime::{Controller, Input, InputKind, Output, OutputKind, ReconcileCtx, Runtime};
 pub use state::State;
 pub use watch::{Event, EventKind};

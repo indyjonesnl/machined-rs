@@ -1,6 +1,6 @@
 //! Read-only view over the machine config handed to controllers and tasks.
 
-use crate::types::{MachineConfig, ServiceConfig, Sysctl};
+use crate::types::{MachineConfig, NetworkSection, ServiceConfig, Sysctl};
 
 /// A read-only, cloneable snapshot view of the loaded config.
 #[derive(Clone, Debug)]
@@ -23,5 +23,9 @@ impl Provider {
 
     pub fn services(&self) -> &[ServiceConfig] {
         &self.config.machine.services
+    }
+
+    pub fn network(&self) -> &NetworkSection {
+        &self.config.machine.network
     }
 }

@@ -1,6 +1,7 @@
 //! Typed machine configuration (clean-break, single-document YAML).
 
 use serde::Deserialize;
+use std::net::IpAddr;
 
 /// Top-level machine config document.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -22,6 +23,9 @@ pub struct MachineSection {
     /// Services machined supervises (the payload + helpers).
     #[serde(default)]
     pub services: Vec<ServiceConfig>,
+    /// Node network configuration.
+    #[serde(default)]
+    pub network: NetworkSection,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -56,4 +60,48 @@ pub enum RestartPolicy {
     OnFailure,
     /// Always restart.
     Always,
+}
+
+/// Static node network configuration.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkSection {
+    #[serde(default)]
+    pub interfaces: Vec<InterfaceConfig>,
+    #[serde(default)]
+    pub nameservers: Vec<IpAddr>,
+    #[serde(default)]
+    pub search: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InterfaceConfig {
+    pub name: String,
+    /// Admin state; defaults to up.
+    #[serde(default = "default_true")]
+    pub up: bool,
+    #[serde(default)]
+    pub mtu: Option<u32>,
+    /// Addresses in `ip/prefix` form (parsed by the network controller).
+    #[serde(default)]
+    pub addresses: Vec<String>,
+    #[serde(default)]
+    pub routes: Vec<RouteConfig>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteConfig {
+    /// Destination CIDR; `None`/absent or `0.0.0.0/0` means default route.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// Gateway IP.
+    pub via: IpAddr,
+    #[serde(default)]
+    pub metric: Option<u32>,
 }

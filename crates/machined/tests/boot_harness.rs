@@ -34,6 +34,7 @@ async fn boots_supervises_and_shuts_down() {
                 depends_on: vec![],
                 restart: RestartPolicy::Never,
             }],
+            network: Default::default(),
         },
     };
 

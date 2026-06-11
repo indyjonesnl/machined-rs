@@ -11,6 +11,14 @@ use std::fmt;
 pub enum ResourceType {
     MachineConfig,
     ServiceStatus,
+    LinkSpec,
+    AddressSpec,
+    RouteSpec,
+    HostnameSpec,
+    ResolverSpec,
+    LinkStatus,
+    AddressStatus,
+    RouteStatus,
 }
 
 impl fmt::Display for ResourceType {
@@ -18,6 +26,14 @@ impl fmt::Display for ResourceType {
         let s = match self {
             ResourceType::MachineConfig => "MachineConfig",
             ResourceType::ServiceStatus => "ServiceStatus",
+            ResourceType::LinkSpec => "LinkSpec",
+            ResourceType::AddressSpec => "AddressSpec",
+            ResourceType::RouteSpec => "RouteSpec",
+            ResourceType::HostnameSpec => "HostnameSpec",
+            ResourceType::ResolverSpec => "ResolverSpec",
+            ResourceType::LinkStatus => "LinkStatus",
+            ResourceType::AddressStatus => "AddressStatus",
+            ResourceType::RouteStatus => "RouteStatus",
         };
         f.write_str(s)
     }

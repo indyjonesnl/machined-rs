@@ -6,4 +6,7 @@ pub mod types;
 
 pub use load::{load_from_str, ConfigError};
 pub use provider::Provider;
-pub use types::{MachineConfig, MachineSection, RestartPolicy, ServiceConfig, Sysctl};
+pub use types::{
+    InterfaceConfig, MachineConfig, MachineSection, NetworkSection, RestartPolicy, RouteConfig,
+    ServiceConfig, Sysctl,
+};
