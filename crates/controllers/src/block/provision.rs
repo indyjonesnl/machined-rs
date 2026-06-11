@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use machined_block::{BlockProvisioner, FsType, PartType, PartitionPlan};
 use machined_config::Provider;
 use machined_resources::{
-    DiscoveredVolume, Resource, ResourceObject, ResourceType, VolumePhase, VolumeStatus,
+    DiscoveredVolume, Key, Resource, ResourceObject, ResourceType, VolumePhase, VolumeStatus,
 };
 use machined_runtime_core::{
     reconcile_owned, Controller, Input, InputKind, Output, OutputKind, ReconcileCtx,
@@ -51,21 +51,20 @@ pub fn plan_provisioning(
         .filter(|v| v.disk == leaf || v.device == install_disk)
         .collect();
 
-    if on_disk.is_empty() {
-        return ProvisionDecision::Provision; // blank disk
-    }
-
-    // "Ours" is decided by EXACT label-set equality (no more, no less than our
-    // three labels). Labels are the sole trust anchor here: a disk carrying any
-    // foreign/extra label is treated as foreign (RefuseForeign unless wipe).
+    // "Ours" requires EXACT label-set equality — exactly our three labels, no
+    // more, no fewer. Labels are the sole trust anchor.
     let labels: Vec<&str> = on_disk.iter().map(|v| v.partition_label.as_str()).collect();
-    let is_ours =
-        LABELS.iter().all(|l| labels.contains(l)) && labels.iter().all(|l| LABELS.contains(l));
-    if is_ours {
-        return ProvisionDecision::Skip;
-    }
+    let is_ours = !on_disk.is_empty()
+        && LABELS.iter().all(|l| labels.contains(l))
+        && labels.iter().all(|l| LABELS.contains(l));
 
-    if wipe {
+    // CONSERVATIVE SAFETY: wipe == false is NEVER destructive. An empty discovered
+    // set does NOT mean "blank" — discovery is GPT-only and best-effort, so an MBR
+    // disk or an unreadable disk also produces no DiscoveredVolume. Anything not
+    // already exactly ours therefore requires explicit wipe to provision.
+    if is_ours {
+        ProvisionDecision::Skip
+    } else if wipe {
         ProvisionDecision::Provision
     } else {
         ProvisionDecision::RefuseForeign
@@ -115,9 +114,19 @@ mod guard_tests {
     }
 
     #[test]
-    fn blank_disk_provisions() {
+    fn blank_looking_disk_without_wipe_refuses() {
+        // CONSERVATIVE: an empty discovered set is NOT trusted as "blank"
+        // (could be MBR/unreadable). wipe:false never provisions.
         assert_eq!(
             plan_provisioning("/dev/sda", false, &[]),
+            ProvisionDecision::RefuseForeign
+        );
+    }
+
+    #[test]
+    fn blank_looking_disk_with_wipe_provisions() {
+        assert_eq!(
+            plan_provisioning("/dev/sda", true, &[]),
             ProvisionDecision::Provision
         );
     }
@@ -165,9 +174,10 @@ mod guard_tests {
 
     #[test]
     fn volumes_on_other_disk_ignored() {
+        // sdb's foreign data doesn't affect sda; with wipe sda provisions.
         let d = vec![vol("sdb", "WINDOWS")];
         assert_eq!(
-            plan_provisioning("/dev/sda", false, &d),
+            plan_provisioning("/dev/sda", true, &d),
             ProvisionDecision::Provision
         );
     }
@@ -188,15 +198,19 @@ mod guard_tests {
     }
 
     #[test]
-    fn similar_disk_name_does_not_match() {
-        // Regression guard: a parent-disk filter must use EXACT equality, so
-        // "sda" must NOT match "sda1"/"sdaa". Neither volume is on /dev/sda, so
-        // the disk reads as blank → Provision (crucially NOT RefuseForeign by
-        // an accidental substring match).
-        let d = vec![vol("sdaa", "WINDOWS"), vol("sda1", "DATA")];
+    fn similar_disk_name_does_not_skip() {
+        // Regression guard for the SKIP path: our exact labels live on "sda1"
+        // (a different device), so they must NOT be attributed to "/dev/sda" and
+        // make it Skip. With nothing actually on sda, wipe:false → RefuseForeign
+        // (never Skip). A substring/prefix match bug would wrongly return Skip.
+        let d = vec![
+            vol("sda1", "EFI"),
+            vol("sda1", "STATE"),
+            vol("sda1", "EPHEMERAL"),
+        ];
         assert_eq!(
             plan_provisioning("/dev/sda", false, &d),
-            ProvisionDecision::Provision
+            ProvisionDecision::RefuseForeign
         );
     }
 
@@ -245,12 +259,16 @@ impl Controller for VolumeProvisionerController {
     }
 
     fn inputs(&self) -> Vec<Input> {
-        // Re-evaluate when discovery changes.
-        vec![Input {
-            namespace: NS.to_string(),
-            typ: ResourceType::DiscoveredVolume,
-            kind: InputKind::Weak,
-        }]
+        // Re-evaluate when discovery publishes. DiskStatus is the barrier
+        // signal (published last by discovery), DiscoveredVolume the content.
+        [ResourceType::DiskStatus, ResourceType::DiscoveredVolume]
+            .into_iter()
+            .map(|typ| Input {
+                namespace: NS.to_string(),
+                typ,
+                kind: InputKind::Weak,
+            })
+            .collect()
     }
 
     fn outputs(&self) -> Vec<Output> {
@@ -265,6 +283,19 @@ impl Controller for VolumeProvisionerController {
             return Ok(()); // no install target configured
         };
         let disk = install.disk.clone();
+        let leaf = disk.rsplit('/').next().unwrap_or(&disk);
+
+        // Discovery barrier: do nothing until discovery has scanned this disk
+        // (its DiskStatus, published AFTER its DiscoveredVolumes, is the signal).
+        // Without this, the provisioner's initial reconcile could read an empty
+        // pre-discovery store and mistake a foreign disk for blank.
+        if ctx
+            .state
+            .get(&Key::new(NS, ResourceType::DiskStatus, leaf))
+            .is_err()
+        {
+            return Ok(());
+        }
 
         let discovered: Vec<DiscoveredVolume> = ctx
             .state
@@ -405,6 +436,43 @@ mod controller_tests {
             .unwrap();
     }
 
+    /// Seed the install disk's DiskStatus — the discovery barrier signal.
+    fn seed_disk_status(state: &State, disk: &str) {
+        state
+            .create(ResourceObject::new(
+                NS,
+                disk,
+                Res::DiskStatus(machined_resources::DiskStatus {
+                    name: disk.into(),
+                    path: format!("/dev/{disk}"),
+                    size_bytes: 8 << 30,
+                    model: "M".into(),
+                    serial: "S".into(),
+                    rotational: false,
+                    read_only: false,
+                }),
+            ))
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn waits_for_discovery_barrier() {
+        // No DiskStatus for the install disk → discovery hasn't run → the
+        // provisioner must do NOTHING (no error, no destructive call), even with
+        // wipe:true. This is the boot-race fix.
+        let backend = Arc::new(FakeBlockBackend::new());
+        let state = State::new();
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
+        let mut c = VolumeProvisionerController::new(backend.clone(), provider("/dev/sda", true));
+        c.reconcile(&ctx).await.unwrap();
+        assert!(backend.wipes().is_empty());
+        assert!(backend.creates().is_empty());
+        assert!(backend.formats().is_empty());
+        assert_eq!(state.list(NS, ResourceType::VolumeStatus).len(), 0);
+    }
+
     #[tokio::test]
     async fn blank_disk_gets_provisioned() {
         let backend = Arc::new(FakeBlockBackend::new().with_disk(DiskInfo {
@@ -417,10 +485,12 @@ mod controller_tests {
             read_only: false,
         }));
         let state = State::new();
+        seed_disk_status(&state, "sda"); // discovery has scanned the disk
         let ctx = ReconcileCtx {
             state: state.clone(),
         };
-        let mut c = VolumeProvisionerController::new(backend.clone(), provider("/dev/sda", false));
+        // Blank-looking disk now requires wipe:true to provision.
+        let mut c = VolumeProvisionerController::new(backend.clone(), provider("/dev/sda", true));
         c.reconcile(&ctx).await.unwrap();
 
         // Three partitions created + formatted; three VolumeStatus published.
@@ -433,6 +503,7 @@ mod controller_tests {
     async fn foreign_disk_without_wipe_makes_no_destructive_call() {
         let backend = Arc::new(FakeBlockBackend::new());
         let state = State::new();
+        seed_disk_status(&state, "sda");
         seed_discovered(&state, "sda", "WINDOWS");
         let ctx = ReconcileCtx {
             state: state.clone(),
@@ -454,10 +525,11 @@ mod controller_tests {
         // discovery reflecting our layout → Skip (no second create).
         let backend = Arc::new(FakeBlockBackend::new());
         let state = State::new();
+        seed_disk_status(&state, "sda");
         let ctx = ReconcileCtx {
             state: state.clone(),
         };
-        let mut c = VolumeProvisionerController::new(backend.clone(), provider("/dev/sda", false));
+        let mut c = VolumeProvisionerController::new(backend.clone(), provider("/dev/sda", true));
         c.reconcile(&ctx).await.unwrap();
         assert_eq!(backend.creates().len(), 1);
 
@@ -474,6 +546,7 @@ mod controller_tests {
     async fn foreign_with_wipe_wipes_then_provisions() {
         let backend = Arc::new(FakeBlockBackend::new());
         let state = State::new();
+        seed_disk_status(&state, "sda");
         seed_discovered(&state, "sda", "WINDOWS");
         let ctx = ReconcileCtx {
             state: state.clone(),
