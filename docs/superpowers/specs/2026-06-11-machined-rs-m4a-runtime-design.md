@@ -113,7 +113,8 @@ immediately.
 
 ### 3.6 machined wiring
 
-Unless `runtime.disabled`:
+Unless `runtime.disabled` (steps 1–2 live in the sequencer's StartServices boot task — the natural
+home for boot actions; step 3 in machined's `run_daemon`):
 1. **Generate** the minimal containerd config at `config_path` (create parent dirs; only if absent —
    the file is owned by machined but user-replaceable by baking their own into the image):
 
