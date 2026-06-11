@@ -48,6 +48,15 @@ impl Platform for FakePlatform {
     fn kernel_cmdline(&self) -> Result<String> {
         Ok(self.cmdline.clone())
     }
+    fn is_mounted(&self, target: &str) -> Result<bool> {
+        Ok(self
+            .recorded
+            .lock()
+            .unwrap()
+            .mounts
+            .iter()
+            .any(|m| m.target == target))
+    }
     fn reboot(&self) -> Result<()> {
         self.recorded.lock().unwrap().rebooted = true;
         Ok(())
@@ -75,5 +84,20 @@ mod tests {
         assert_eq!(rec.mounts[0].target, "/proc");
         assert_eq!(rec.sysctls[0], ("net.ipv4.ip_forward".into(), "1".into()));
         assert_eq!(rec.hostname.as_deref(), Some("node-1"));
+    }
+
+    #[test]
+    fn fake_tracks_is_mounted() {
+        let p = FakePlatform::new();
+        p.mount(&MountSpec {
+            source: "/dev/sda2".into(),
+            target: "/var".into(),
+            fstype: "ext4".into(),
+            flags: 0,
+            data: None,
+        })
+        .unwrap();
+        assert!(p.is_mounted("/var").unwrap());
+        assert!(!p.is_mounted("/boot").unwrap());
     }
 }

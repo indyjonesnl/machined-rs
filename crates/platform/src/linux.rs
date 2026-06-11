@@ -58,6 +58,14 @@ impl Platform for LinuxPlatform {
         Ok(fs::read_to_string("/proc/cmdline")?)
     }
 
+    fn is_mounted(&self, target: &str) -> Result<bool> {
+        // /proc/self/mountinfo field 5 (1-based) is the mount point.
+        let content = std::fs::read_to_string("/proc/self/mountinfo")?;
+        Ok(content
+            .lines()
+            .any(|line| line.split_whitespace().nth(4) == Some(target)))
+    }
+
     fn reboot(&self) -> Result<()> {
         reboot(RebootMode::RB_AUTOBOOT)
             .map(|_| ())
@@ -68,5 +76,17 @@ impl Platform for LinuxPlatform {
         reboot(RebootMode::RB_POWER_OFF)
             .map(|_| ())
             .map_err(|e| PlatformError::Other(format!("poweroff: {e}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn root_is_mounted_bogus_is_not() {
+        let p = LinuxPlatform::new();
+        assert!(p.is_mounted("/").unwrap(), "/ must be mounted");
+        assert!(!p.is_mounted("/no/such/mountpoint").unwrap());
     }
 }

@@ -43,6 +43,16 @@ pub struct VolumeStatus {
     pub phase: VolumePhase,
 }
 
+/// Observed state of a managed mount.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountStatus {
+    pub volume: String,
+    pub source: String,
+    pub target: String,
+    pub fstype: String,
+    pub mounted: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,5 +83,17 @@ mod tests {
             phase: VolumePhase::Provisioned,
         };
         assert_eq!(v.phase, VolumePhase::Provisioned);
+    }
+
+    #[test]
+    fn mount_status_constructs() {
+        let m = MountStatus {
+            volume: "STATE".into(),
+            source: "/dev/sda2".into(),
+            target: "/system/state".into(),
+            fstype: "ext4".into(),
+            mounted: true,
+        };
+        assert!(m.mounted);
     }
 }
