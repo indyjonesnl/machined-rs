@@ -662,10 +662,9 @@ impl SysfsBlock {
             device: device.clone(),
             message: e.to_string(),
         })?;
-        let lb: u64 = match gpt_disk.logical_block_size() {
-            gpt::disk::LogicalBlockSize::Lb512 => 512,
-            gpt::disk::LogicalBlockSize::Lb4096 => 4096,
-        };
+        // gpt 3.1: logical_block_size() returns &LogicalBlockSize (Copy); pass it
+        // by value to bytes_len(), which takes the enum (not a u64).
+        let lb = *gpt_disk.logical_block_size();
         let mut out = Vec::new();
         for (idx, part) in gpt_disk.partitions() {
             out.push(PartEntry {
@@ -741,7 +740,9 @@ impl BlockBackend for SysfsBlock {
                 source,
             })?;
             let name = entry.file_name().to_string_lossy().to_string();
-            // Skip pure memory-backed virtual devices.
+            // Skip only pure memory-backed virtual devices. loop/dm/md are kept
+            // deliberately: loop is needed by the loopback integration test, and a
+            // device with no GPT is harmlessly skipped during list_volumes anyway.
             if name.starts_with("ram") || name.starts_with("zram") {
                 continue;
             }
@@ -752,7 +753,7 @@ impl BlockBackend for SysfsBlock {
             out.push(DiskInfo {
                 name: name.clone(),
                 path: self.dev_root.join(&name).to_string_lossy().to_string(),
-                size_bytes: size_sectors * 512,
+                size_bytes: size_sectors.saturating_mul(512),
                 model: read_trim(&dir.join("device/model")).unwrap_or_default(),
                 serial: read_trim(&dir.join("device/serial")).unwrap_or_default(),
                 rotational: read_trim(&dir.join("queue/rotational")).as_deref() == Some("1"),
@@ -859,9 +860,14 @@ mod tests {
         gdisk
             .update_partitions(std::collections::BTreeMap::new())
             .unwrap();
-        let efi = gpt::partition_types::EFI;
-        gdisk.add_partition("EFI", 1024 * 1024, efi, 0, None).unwrap();
-        gdisk.add_partition("STATE", 1024 * 1024, efi, 0, None).unwrap();
+        // `Type` is Clone-not-Copy, so pass the const directly to each call
+        // rather than binding (which would move on first use).
+        gdisk
+            .add_partition("EFI", 1024 * 1024, gpt::partition_types::EFI, 0, None)
+            .unwrap();
+        gdisk
+            .add_partition("STATE", 1024 * 1024, gpt::partition_types::EFI, 0, None)
+            .unwrap();
         gdisk.write().unwrap();
 
         let be = SysfsBlock::with_roots("/sys", &dir);
