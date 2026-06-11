@@ -96,6 +96,29 @@ fn build_time_sync() -> Arc<dyn machined_time::TimeSync> {
     }
 }
 
+/// Default service readiness, plus: the built-in containerd service is ready
+/// only once the CRI probe reports the runtime ready (RuntimeStatus.ready).
+struct RuntimeReadiness;
+
+impl machined_supervisor::ReadinessCheck for RuntimeReadiness {
+    fn is_ready(&self, state: &machined_runtime_core::State, dep_id: &str) -> bool {
+        use machined_resources::{Key, Resource, ResourceType};
+        let base = machined_supervisor::DefaultReadiness.is_ready(state, dep_id);
+        if dep_id != machined_config::RUNTIME_SERVICE_ID {
+            return base;
+        }
+        let cri_ready = matches!(
+            state
+                .get(&Key::new(NS_RUNTIME, ResourceType::RuntimeStatus, "containerd"))
+                .map(|o| o.spec),
+            Ok(Resource::RuntimeStatus(r)) if r.ready
+        );
+        base && cri_ready
+    }
+}
+
+const NS_RUNTIME: &str = "runtime";
+
 /// Write a machinectl client bundle (ca + a fresh client cert) into `dir`.
 fn write_client_bundle(dir: &Path, pki: &NodePki) -> anyhow::Result<()> {
     std::fs::create_dir_all(dir)?;
@@ -246,7 +269,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         platform: platform.clone(),
         provider,
         services: services.clone(),
-        readiness: Arc::new(machined_supervisor::DefaultReadiness),
+        readiness: Arc::new(RuntimeReadiness),
     };
 
     // Boot.
@@ -293,4 +316,54 @@ async fn run_daemon() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use machined_resources::{
+        Resource, ResourceObject, RuntimeStatus, ServiceState, ServiceStatusSpec,
+    };
+    use machined_runtime_core::State;
+    use machined_supervisor::ReadinessCheck;
+
+    fn svc_running(state: &State, id: &str) {
+        let _ = state.create(ResourceObject::new(
+            "runtime",
+            id,
+            Resource::ServiceStatus(ServiceStatusSpec {
+                service_id: id.into(),
+                state: ServiceState::Running,
+                healthy: true,
+                last_message: String::new(),
+            }),
+        ));
+    }
+
+    #[test]
+    fn containerd_needs_cri_ready_too() {
+        let state = State::new();
+        svc_running(&state, "containerd");
+        // Process running but CRI not ready → NOT ready.
+        assert!(!RuntimeReadiness.is_ready(&state, "containerd"));
+
+        let _ = state.create(ResourceObject::new(
+            "runtime",
+            "containerd",
+            Resource::RuntimeStatus(RuntimeStatus {
+                ready: true,
+                name: "containerd".into(),
+                version: "2".into(),
+            }),
+        ));
+        assert!(RuntimeReadiness.is_ready(&state, "containerd"));
+    }
+
+    #[test]
+    fn other_services_use_default_rule_only() {
+        let state = State::new();
+        svc_running(&state, "payload");
+        // No RuntimeStatus anywhere — non-containerd ids don't need it.
+        assert!(RuntimeReadiness.is_ready(&state, "payload"));
+    }
 }
