@@ -1,7 +1,7 @@
 //! The closed `Resource` enum (typed specs) and `ResourceObject`
 //! (metadata + spec) stored by the runtime.
 
-use crate::block::{DiscoveredVolume, DiskStatus, VolumeStatus};
+use crate::block::{DiscoveredVolume, DiskStatus, MountStatus, VolumeStatus};
 use crate::metadata::{Metadata, ResourceType};
 use crate::network::{
     AddressSpec, AddressStatus, HostnameSpec, LinkSpec, LinkStatus, ResolverSpec, RouteSpec,
@@ -52,6 +52,7 @@ pub enum Resource {
     DiskStatus(DiskStatus),
     DiscoveredVolume(DiscoveredVolume),
     VolumeStatus(VolumeStatus),
+    MountStatus(MountStatus),
 }
 
 impl Resource {
@@ -71,6 +72,7 @@ impl Resource {
             Resource::DiskStatus(_) => ResourceType::DiskStatus,
             Resource::DiscoveredVolume(_) => ResourceType::DiscoveredVolume,
             Resource::VolumeStatus(_) => ResourceType::VolumeStatus,
+            Resource::MountStatus(_) => ResourceType::MountStatus,
         }
     }
 }
