@@ -14,7 +14,7 @@ use machined_pki::NodePki;
 use machined_runtime_core::State;
 use tonic::transport::Server;
 
-pub use service::Machine;
+pub use service::{Machine, NodeAction};
 
 /// Serve the management API over mutual TLS until the process exits.
 pub async fn serve(
@@ -22,8 +22,11 @@ pub async fn serve(
     state: State,
     version: impl Into<String>,
     pki: &NodePki,
+    actions: tokio::sync::mpsc::Sender<NodeAction>,
 ) -> Result<(), tonic::transport::Error> {
-    let svc = pb::machine_service_server::MachineServiceServer::new(Machine::new(state, version));
+    let svc = pb::machine_service_server::MachineServiceServer::new(Machine::new(
+        state, version, actions,
+    ));
     let tls = server_tls(pki);
     Server::builder()
         .tls_config(tls)?

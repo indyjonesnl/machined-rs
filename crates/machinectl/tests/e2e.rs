@@ -47,7 +47,7 @@ async fn machinectl_queries_a_real_server() {
             .identity(Identity::from_pem(scert, skey))
             .client_ca_root(Certificate::from_pem(ca_pem));
         let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-            machined_apiserver::Machine::new(state, "1.2.3"),
+            machined_apiserver::Machine::new(state, "1.2.3", tokio::sync::mpsc::channel(1).0),
         );
         Server::builder()
             .tls_config(tls)

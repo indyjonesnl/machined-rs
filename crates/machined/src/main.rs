@@ -201,10 +201,16 @@ async fn run_daemon() -> anyhow::Result<()> {
             }
             let api_addr: SocketAddr = "127.0.0.1:50000".parse().unwrap();
             let api_state = state.clone();
+            let (api_action_tx, _api_action_rx) = tokio::sync::mpsc::channel(1);
             tokio::spawn(async move {
-                if let Err(e) =
-                    machined_apiserver::serve(api_addr, api_state, env!("CARGO_PKG_VERSION"), &pki)
-                        .await
+                if let Err(e) = machined_apiserver::serve(
+                    api_addr,
+                    api_state,
+                    env!("CARGO_PKG_VERSION"),
+                    &pki,
+                    api_action_tx,
+                )
+                .await
                 {
                     error!("apiserver exited: {e}");
                 }

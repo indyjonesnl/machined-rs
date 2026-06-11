@@ -1,22 +1,36 @@
 //! `MachineService` gRPC implementation over the COSI store.
 
 use machined_runtime_core::State;
+use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
 use crate::pb::machine_service_server::MachineService;
 use crate::pb::{Empty, ListResourcesRequest, ListResourcesResponse, VersionResponse};
 
+/// A node lifecycle action requested via the API, handed to the daemon main loop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NodeAction {
+    Reboot,
+    Shutdown,
+}
+
 /// gRPC service backed by the resource store.
 pub struct Machine {
     state: State,
     version: String,
+    actions: mpsc::Sender<NodeAction>,
 }
 
 impl Machine {
-    pub fn new(state: State, version: impl Into<String>) -> Self {
+    pub fn new(
+        state: State,
+        version: impl Into<String>,
+        actions: mpsc::Sender<NodeAction>,
+    ) -> Self {
         Self {
             state,
             version: version.into(),
+            actions,
         }
     }
 }
@@ -53,5 +67,23 @@ impl MachineService for Machine {
             })
             .collect();
         Ok(Response::new(ListResourcesResponse { entries }))
+    }
+
+    async fn reboot(&self, _req: Request<Empty>) -> Result<Response<Empty>, Status> {
+        tracing::info!("reboot requested via API");
+        self.actions
+            .send(NodeAction::Reboot)
+            .await
+            .map_err(|_| Status::unavailable("daemon is shutting down"))?;
+        Ok(Response::new(Empty {}))
+    }
+
+    async fn shutdown(&self, _req: Request<Empty>) -> Result<Response<Empty>, Status> {
+        tracing::info!("shutdown requested via API");
+        self.actions
+            .send(NodeAction::Shutdown)
+            .await
+            .map_err(|_| Status::unavailable("daemon is shutting down"))?;
+        Ok(Response::new(Empty {}))
     }
 }
