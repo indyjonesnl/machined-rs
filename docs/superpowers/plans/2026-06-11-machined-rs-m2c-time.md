@@ -59,7 +59,10 @@ optional interval (first tick at `now + d`, so it does not double-fire the initi
 
 ```rust
     let mut resync = controller.resync_interval().map(|d| {
-        tokio::time::interval_at(tokio::time::Instant::now() + d, d)
+        let mut iv = tokio::time::interval_at(tokio::time::Instant::now() + d, d);
+        // Skip missed ticks so a slow reconcile cannot cause a catch-up burst.
+        iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        iv
     });
 ```
 
@@ -188,9 +191,10 @@ Add to the `tests` module in `runtime.rs`:
     }
 ```
 
-> The `tests` module already imports `Arc`, `Duration`, `async_trait`, `Controller`, `Input`, `Output`,
+> The `tests` module imports `Duration`, `async_trait`, `Controller`, `Input`, `Output`,
 > `ReconcileCtx`, `Result`, `Runtime`, `CancellationToken` (from the existing
-> `controller_reacts_to_input_change` test). Add only the `AtomicUsize`/`Ordering` import shown.
+> `controller_reacts_to_input_change` test). Add `use std::sync::Arc;` AND
+> `use std::sync::atomic::{AtomicUsize, Ordering};` (the existing tests do not import `Arc`).
 
 - [ ] **Step 4: Test + clippy + commit**
 
