@@ -4,6 +4,8 @@ package machine;
 service MachineService {
   rpc Version(Empty) returns (VersionResponse);
   rpc ListResources(ListResourcesRequest) returns (ListResourcesResponse);
+  rpc Reboot(Empty) returns (Empty);
+  rpc Shutdown(Empty) returns (Empty);
 }
 
 message Empty {}

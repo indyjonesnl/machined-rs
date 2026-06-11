@@ -12,7 +12,7 @@ use tonic::transport::Server;
 async fn version_over_plaintext() {
     let state = State::new();
     let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-        Machine::new(state, "9.9.9"),
+        Machine::new(state, "9.9.9", tokio::sync::mpsc::channel(1).0),
     );
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -54,7 +54,7 @@ async fn lists_seeded_resources_over_plaintext() {
         .unwrap();
 
     let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-        Machine::new(state, "9.9.9"),
+        Machine::new(state, "9.9.9", tokio::sync::mpsc::channel(1).0),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -113,7 +113,7 @@ async fn mtls_requires_a_valid_client_cert() {
                 .client_ca_root(Certificate::from_pem(pki_moved.ca_pem()))
         };
         let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-            machined_apiserver::Machine::new(state, "9.9.9"),
+            machined_apiserver::Machine::new(state, "9.9.9", tokio::sync::mpsc::channel(1).0),
         );
         Server::builder()
             .tls_config(tls)
@@ -183,4 +183,35 @@ async fn mtls_requires_a_valid_client_cert() {
     std::fs::remove_dir_all(&rogue_dir).ok();
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn reboot_and_shutdown_enqueue_actions() {
+    use machined_apiserver::pb::machine_service_client::MachineServiceClient;
+    use machined_apiserver::pb::Empty;
+    use machined_apiserver::{Machine, NodeAction};
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+    let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
+        Machine::new(State::new(), "9.9.9", tx),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    tokio::spawn(async move {
+        Server::builder()
+            .add_service(svc)
+            .serve_with_incoming(incoming)
+            .await
+            .unwrap();
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let mut client = MachineServiceClient::connect(format!("http://{addr}"))
+        .await
+        .unwrap();
+    client.reboot(Empty {}).await.unwrap();
+    assert_eq!(rx.recv().await, Some(NodeAction::Reboot));
+    client.shutdown(Empty {}).await.unwrap();
+    assert_eq!(rx.recv().await, Some(NodeAction::Shutdown));
 }
