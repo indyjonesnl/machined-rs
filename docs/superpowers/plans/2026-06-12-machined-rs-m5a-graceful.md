@@ -603,8 +603,9 @@ git commit -m "feat(supervisor): graceful stop (SIGTERM->grace->kill) + run_supe
     }
 ```
 
-(Adapt the error-variant name to the crate's real `PlatformError`; if `nix::unistd::sync` is
-feature-gated in 0.29, add the needed nix feature — likely `"fs"` — to the workspace list and note it.)
+(CONFIRMED adapt-points: the real variant is the struct form `PlatformError::Mount { target,
+message }`; `nix::unistd::sync` IS gated behind the `"fs"` feature in 0.29 — added to the workspace
+nix features.)
 
 `crates/platform/src/fake.rs` — record + flip `is_mounted`:
 
