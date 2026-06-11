@@ -107,6 +107,9 @@ impl machined_supervisor::ReadinessCheck for RuntimeReadiness {
         if dep_id != machined_config::RUNTIME_SERVICE_ID {
             return base;
         }
+        // base may also be true via Finished (a stopped containerd) with a
+        // momentarily-stale ready=true; harmless — containerd is restart:Always
+        // and the next CRI probe flips ready=false within one tick.
         let cri_ready = matches!(
             state
                 .get(&Key::new(NS_RUNTIME, ResourceType::RuntimeStatus, "containerd"))

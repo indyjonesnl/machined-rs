@@ -33,7 +33,12 @@ impl ReadinessCheck for DefaultReadiness {
 
 /// Block until every dep is ready, publishing a Waiting status meanwhile.
 /// Returns immediately when `deps` is empty or already ready.
-pub async fn wait_for_deps(state: &State, check: &dyn ReadinessCheck, id: &str, deps: &[String]) {
+pub(crate) async fn wait_for_deps(
+    state: &State,
+    check: &dyn ReadinessCheck,
+    id: &str,
+    deps: &[String],
+) {
     let ready = |deps: &[String]| deps.iter().all(|d| check.is_ready(state, d));
     if deps.is_empty() || ready(deps) {
         return;
@@ -88,12 +93,16 @@ mod tests {
         put(&state, "finished", ServiceState::Finished, false);
         put(&state, "failed", ServiceState::Failed, false);
         put(&state, "waiting", ServiceState::Waiting, false);
+        put(&state, "preparing", ServiceState::Preparing, false);
+        put(&state, "skipped", ServiceState::Skipped, false);
 
         assert!(r.is_ready(&state, "running-healthy"));
         assert!(!r.is_ready(&state, "running-unhealthy"));
         assert!(r.is_ready(&state, "finished"), "run-once success satisfies");
         assert!(!r.is_ready(&state, "failed"));
         assert!(!r.is_ready(&state, "waiting"));
+        assert!(!r.is_ready(&state, "preparing"));
+        assert!(!r.is_ready(&state, "skipped"));
     }
 
     #[tokio::test]
