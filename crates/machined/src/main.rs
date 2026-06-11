@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use machined_common::init_logging;
 use machined_config::{load::load_from_path, Provider};
+use machined_controllers::block::DiskDiscoveryController;
 use machined_controllers::network::{
     AddressController, HostnameController, LinkController, NetworkConfigController,
     ResolverController, RouteController,
@@ -47,6 +48,17 @@ fn build_network_backend() -> Arc<dyn machined_netlink::NetworkBackend> {
     #[cfg(not(target_os = "linux"))]
     {
         Arc::new(machined_netlink::FakeNetworkBackend::new())
+    }
+}
+
+fn build_block_backend() -> Arc<dyn machined_block::BlockBackend> {
+    #[cfg(target_os = "linux")]
+    {
+        Arc::new(machined_block::SysfsBlock::new())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Arc::new(machined_block::FakeBlockBackend::new())
     }
 }
 
@@ -109,6 +121,10 @@ async fn run_daemon() -> anyhow::Result<()> {
     runtime.register(Box::new(RouteController::new(net_backend.clone())));
     runtime.register(Box::new(HostnameController::new(platform.clone())));
     runtime.register(Box::new(ResolverController::at_etc()));
+
+    runtime.register(Box::new(
+        DiskDiscoveryController::new(build_block_backend()),
+    ));
 
     let rt_token = shutdown.clone();
     let rt_handle = tokio::spawn(async move {

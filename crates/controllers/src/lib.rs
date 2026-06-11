@@ -1,3 +1,4 @@
-//! machined-rs controllers. Currently the network pipeline.
+//! machined-rs controllers.
 
+pub mod block;
 pub mod network;

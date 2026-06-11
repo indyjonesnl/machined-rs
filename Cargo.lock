@@ -308,6 +308,7 @@ name = "machined"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "machined-block",
  "machined-common",
  "machined-config",
  "machined-controllers",
@@ -358,6 +359,7 @@ name = "machined-controllers"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "machined-block",
  "machined-common",
  "machined-config",
  "machined-netlink",

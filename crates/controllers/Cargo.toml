@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+machined-block.workspace = true
 machined-common.workspace = true
 machined-config.workspace = true
 machined-netlink.workspace = true
