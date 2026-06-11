@@ -792,11 +792,13 @@ name = "machined"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "machined-apiserver",
  "machined-block",
  "machined-common",
  "machined-config",
  "machined-controllers",
  "machined-netlink",
+ "machined-pki",
  "machined-platform",
  "machined-resources",
  "machined-runtime-core",

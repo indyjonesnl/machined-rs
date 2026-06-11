@@ -3,6 +3,8 @@
 mod emergency;
 mod pid1;
 
+use std::net::SocketAddr;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -16,6 +18,7 @@ use machined_controllers::network::{
     ResolverController, RouteController,
 };
 use machined_controllers::time::TimeSyncController;
+use machined_pki::NodePki;
 use machined_platform::Platform;
 use machined_runtime_core::Runtime;
 use machined_sequencer::{boot_sequence, shutdown_sequence, SequencerCtx};
@@ -85,6 +88,24 @@ fn build_time_sync() -> Arc<dyn machined_time::TimeSync> {
     {
         Arc::new(machined_time::FakeTimeSync::new())
     }
+}
+
+/// Write a machinectl client bundle (ca + a fresh client cert) into `dir`.
+fn write_client_bundle(dir: &Path, pki: &NodePki) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let client = pki.issue_client("machinectl")?;
+    std::fs::write(dir.join("ca.pem"), pki.ca_pem())?;
+    std::fs::write(dir.join("client.pem"), &client.cert_pem)?;
+    std::fs::write(dir.join("client.key"), &client.key_pem)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            dir.join("client.key"),
+            std::fs::Permissions::from_mode(0o600),
+        )?;
+    }
+    Ok(())
 }
 
 #[tokio::main]
@@ -170,6 +191,28 @@ async fn run_daemon() -> anyhow::Result<()> {
             error!("runtime error: {e}");
         }
     });
+
+    // Management API (M3a): node PKI + mTLS gRPC server, sharing the COSI store.
+    let pki_dir = std::path::PathBuf::from("/system/state/pki");
+    match NodePki::load_or_generate(&pki_dir, "node", &["127.0.0.1".into(), "localhost".into()]) {
+        Ok(pki) => {
+            if let Err(e) = write_client_bundle(&pki_dir.join("machinectl"), &pki) {
+                error!("writing machinectl bundle: {e}");
+            }
+            let api_addr: SocketAddr = "127.0.0.1:50000".parse().unwrap();
+            let api_state = state.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    machined_apiserver::serve(api_addr, api_state, env!("CARGO_PKG_VERSION"), &pki)
+                        .await
+                {
+                    error!("apiserver exited: {e}");
+                }
+            });
+            info!("management API listening on {api_addr}");
+        }
+        Err(e) => error!("PKI init failed; management API disabled: {e}"),
+    }
 
     let ctx = SequencerCtx {
         state,
