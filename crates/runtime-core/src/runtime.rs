@@ -71,6 +71,11 @@ pub trait Controller: Send {
     fn inputs(&self) -> Vec<Input>;
     fn outputs(&self) -> Vec<Output>;
     async fn reconcile(&mut self, ctx: &ReconcileCtx) -> Result<()>;
+
+    /// Optional periodic re-reconcile interval. Default `None` = event-driven only.
+    fn resync_interval(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 /// Registers controllers and drives their reconcile loops over a shared store.
@@ -148,6 +153,10 @@ async fn controller_loop(
     // debounce below intentionally caps reconciles to ~one per DEBOUNCE window
     // under sustained input churn.
 
+    let mut resync = controller
+        .resync_interval()
+        .map(|d| tokio::time::interval_at(tokio::time::Instant::now() + d, d));
+
     // Initial reconcile.
     reconcile_once(&mut controller, &ctx).await;
 
@@ -155,6 +164,9 @@ async fn controller_loop(
         tokio::select! {
             _ = shutdown.cancelled() => {
                 return;
+            }
+            _ = tick(resync.as_mut()) => {
+                reconcile_once(&mut controller, &ctx).await;
             }
             recv = rx.recv() => {
                 match recv {
@@ -178,6 +190,17 @@ async fn controller_loop(
     }
 }
 
+/// Await the next tick of an optional interval; never resolves when `None`,
+/// so a controller with no resync interval has no timer arm.
+async fn tick(interval: Option<&mut tokio::time::Interval>) {
+    match interval {
+        Some(iv) => {
+            iv.tick().await;
+        }
+        None => std::future::pending::<()>().await,
+    }
+}
+
 fn matches_inputs(inputs: &[Input], event: &Event) -> bool {
     inputs
         .iter()
@@ -194,6 +217,8 @@ async fn reconcile_once(controller: &mut Box<dyn Controller>, ctx: &ReconcileCtx
 mod tests {
     use super::*;
     use machined_resources::{Key, Resource, ResourceObject, ServiceState, ServiceStatusSpec};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     /// A toy controller: for every ServiceStatus in `Failed` state, it records
     /// a finalizer-free marker by flipping `healthy` to false via update.
@@ -278,5 +303,74 @@ mod tests {
 
         shutdown.cancel();
         handle.await.unwrap().unwrap();
+    }
+
+    struct Counter {
+        count: Arc<AtomicUsize>,
+        interval: Option<Duration>,
+    }
+
+    #[async_trait]
+    impl Controller for Counter {
+        fn name(&self) -> &str {
+            "counter"
+        }
+        fn inputs(&self) -> Vec<Input> {
+            Vec::new()
+        }
+        fn outputs(&self) -> Vec<Output> {
+            Vec::new()
+        }
+        fn resync_interval(&self) -> Option<Duration> {
+            self.interval
+        }
+        async fn reconcile(&mut self, _ctx: &ReconcileCtx) -> Result<()> {
+            self.count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn periodic_controller_reconciles_repeatedly() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let mut rt = Runtime::new();
+        rt.register(Box::new(Counter {
+            count: count.clone(),
+            interval: Some(Duration::from_millis(20)),
+        }));
+        let shutdown = CancellationToken::new();
+        let token = shutdown.clone();
+        let handle = tokio::spawn(async move { rt.run(token).await });
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        shutdown.cancel();
+        handle.await.unwrap().unwrap();
+
+        // Initial reconcile + several timer ticks.
+        assert!(
+            count.load(Ordering::SeqCst) >= 3,
+            "expected periodic reconciles, got {}",
+            count.load(Ordering::SeqCst)
+        );
+    }
+
+    #[tokio::test]
+    async fn non_periodic_controller_reconciles_once() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let mut rt = Runtime::new();
+        rt.register(Box::new(Counter {
+            count: count.clone(),
+            interval: None,
+        }));
+        let shutdown = CancellationToken::new();
+        let token = shutdown.clone();
+        let handle = tokio::spawn(async move { rt.run(token).await });
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        shutdown.cancel();
+        handle.await.unwrap().unwrap();
+
+        // Only the initial reconcile (no inputs, no timer).
+        assert_eq!(count.load(Ordering::SeqCst), 1);
     }
 }
