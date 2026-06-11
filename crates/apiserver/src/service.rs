@@ -33,10 +33,25 @@ impl MachineService for Machine {
         &self,
         req: Request<ListResourcesRequest>,
     ) -> Result<Response<ListResourcesResponse>, Status> {
-        // Filled in Task 3; placeholder so the service compiles in Task 2.
-        let _ = (&self.state, req);
-        Ok(Response::new(ListResourcesResponse {
-            entries: Vec::new(),
-        }))
+        let r = req.into_inner();
+        let typ = crate::mapping::parse_resource_type(&r.r#type).ok_or_else(|| {
+            Status::invalid_argument(format!("unknown resource type: {}", r.r#type))
+        })?;
+        let entries = self
+            .state
+            .list(&r.namespace, typ)
+            .into_iter()
+            .map(|obj| {
+                let fields = crate::mapping::resource_to_fields(&obj.spec)
+                    .into_iter()
+                    .map(|(key, value)| crate::pb::KeyValue { key, value })
+                    .collect();
+                crate::pb::ResourceEntry {
+                    id: obj.metadata.id,
+                    fields,
+                }
+            })
+            .collect();
+        Ok(Response::new(ListResourcesResponse { entries }))
     }
 }
