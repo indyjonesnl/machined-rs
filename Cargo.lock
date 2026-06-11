@@ -443,6 +443,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "machined-time"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nix 0.29.0",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
