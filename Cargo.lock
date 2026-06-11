@@ -450,7 +450,6 @@ dependencies = [
  "nix 0.29.0",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
 ]
 
 [[package]]
