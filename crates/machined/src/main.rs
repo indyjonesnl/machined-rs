@@ -8,6 +8,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use machined_apiserver::NodeAction;
 use machined_common::init_logging;
 use machined_config::{load::load_from_path, Provider};
 use machined_controllers::block::{
@@ -131,6 +132,13 @@ async fn main() {
     }
 }
 
+/// What the daemon does after the graceful shutdown sequence.
+enum FinalAction {
+    Stop,
+    Reboot,
+    Poweroff,
+}
+
 async fn run_daemon() -> anyhow::Result<()> {
     info!("machined starting (pid {})", std::process::id());
     let platform = build_platform();
@@ -192,6 +200,9 @@ async fn run_daemon() -> anyhow::Result<()> {
         }
     });
 
+    // Action channel: API handlers enqueue; the main loop below consumes one.
+    let (api_action_tx, mut api_action_rx) = tokio::sync::mpsc::channel::<NodeAction>(1);
+
     // Management API (M3a): node PKI + mTLS gRPC server, sharing the COSI store.
     let pki_dir = std::path::PathBuf::from("/system/state/pki");
     match NodePki::load_or_generate(&pki_dir, "node", &["127.0.0.1".into(), "localhost".into()]) {
@@ -201,7 +212,7 @@ async fn run_daemon() -> anyhow::Result<()> {
             }
             let api_addr: SocketAddr = "127.0.0.1:50000".parse().unwrap();
             let api_state = state.clone();
-            let (api_action_tx, _api_action_rx) = tokio::sync::mpsc::channel(1);
+            let api_action_tx = api_action_tx.clone();
             tokio::spawn(async move {
                 if let Err(e) = machined_apiserver::serve(
                     api_addr,
@@ -234,8 +245,15 @@ async fn run_daemon() -> anyhow::Result<()> {
     }
     info!("boot complete; node up");
 
-    // Wait for a termination signal.
-    pid1::wait_for_termination().await;
+    // Wait for an OS termination signal OR an API-requested action.
+    let final_action = tokio::select! {
+        _ = pid1::wait_for_termination() => FinalAction::Stop,
+        a = api_action_rx.recv() => match a {
+            Some(NodeAction::Reboot) => FinalAction::Reboot,
+            Some(NodeAction::Shutdown) => FinalAction::Poweroff,
+            None => FinalAction::Stop,
+        },
+    };
     info!("shutting down");
 
     // Shutdown.
@@ -247,5 +265,21 @@ async fn run_daemon() -> anyhow::Result<()> {
     shutdown.cancel();
     let _ = rt_handle.await;
     info!("machined stopped");
+
+    match final_action {
+        FinalAction::Stop => {}
+        FinalAction::Reboot => {
+            info!("rebooting");
+            if let Err(e) = platform.reboot() {
+                error!("reboot failed: {e}");
+            }
+        }
+        FinalAction::Poweroff => {
+            info!("powering off");
+            if let Err(e) = platform.poweroff() {
+                error!("poweroff failed: {e}");
+            }
+        }
+    }
     Ok(())
 }
