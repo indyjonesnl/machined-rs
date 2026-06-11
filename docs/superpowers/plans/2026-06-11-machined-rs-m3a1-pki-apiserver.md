@@ -267,6 +267,11 @@ mod tests {
 }
 ```
 
+> **Review follow-up (applied):** private key files (`ca.key`, `server.key`) are written `0600` on
+> Unix (a `write_key` helper that `set_permissions(0o600)` after `write`), so the CA/server private
+> keys are never world-readable. A `private_key_files_are_owner_only` test asserts the mode. (Full
+> permission/STATE-volume hardening of the whole PKI dir remains a later milestone.)
+
 - [ ] **Step 4: Build (spike gate) + test + commit**
 
 Run: `cargo build -p machined-pki`
