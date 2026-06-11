@@ -804,9 +804,27 @@ git commit -m "feat(block): SysfsBlock provisioning (wipe/partition/format) + lo
 
 ## Task 5: `plan_provisioning` guard + `VolumeProvisionerController`
 
+> **SAFETY REVISION (post-review) — applies to Tasks 5 + 6.** A whole-milestone review found two
+> data-loss paths; the design was revised (see spec §3.4–3.7). The code blocks below already reflect
+> the revision. Specifically:
+> 1. **Guard:** `wipe == false` is NEVER destructive — an empty discovered set is NOT trusted as
+>    "blank"; anything not exactly ours requires `wipe == true`. (Reflected in `plan_provisioning`.)
+> 2. **Discovery barrier:** the provisioner declares `DiskStatus` as a `Weak` input and gates on the
+>    install disk's `DiskStatus` being present before evaluating — so it never reads a pre-discovery
+>    empty store. Requires importing `Key` in `provision.rs` (`use machined_resources::{... Key ...}`).
+> 3. **Discovery reorder (modifies M2b-1's `crates/controllers/src/block/discovery.rs`):** publish
+>    `DiscoveredVolume` BEFORE `DiskStatus`, with both `list_*().await` done first and no `await`
+>    between the two `reconcile_owned` calls — so `DiskStatus` present ⇒ that scan's volumes are
+>    present.
+> 4. **Tests:** guard tests assert `wipe:false` blank → `RefuseForeign`, `wipe:true` blank →
+>    `Provision`; a `waits_for_discovery_barrier` controller test asserts no destructive call when
+>    `DiskStatus` is absent (even with `wipe:true`); controller tests seed a `DiskStatus` to pass the
+>    barrier.
+
 **Files:**
 - Create: `crates/controllers/src/block/provision.rs`
 - Modify: `crates/controllers/src/block/mod.rs`
+- Modify: `crates/controllers/src/block/discovery.rs` (reorder per the safety revision above)
 
 - [ ] **Step 1: Write the pure guard + its exhaustive tests**
 
@@ -821,7 +839,7 @@ use async_trait::async_trait;
 use machined_block::{BlockProvisioner, FsType, PartType, PartitionPlan};
 use machined_config::Provider;
 use machined_resources::{
-    DiscoveredVolume, Resource, ResourceObject, ResourceType, VolumePhase, VolumeStatus,
+    DiscoveredVolume, Key, Resource, ResourceObject, ResourceType, VolumePhase, VolumeStatus,
 };
 use machined_runtime_core::{
     reconcile_owned, Controller, Input, InputKind, Output, OutputKind, ReconcileCtx,
@@ -864,20 +882,19 @@ pub fn plan_provisioning(
         .filter(|v| v.disk == leaf || v.device == install_disk)
         .collect();
 
-    if on_disk.is_empty() {
-        return ProvisionDecision::Provision; // blank disk
-    }
-
-    // EXACT label-set equality. Labels are the sole trust anchor: any foreign/
-    // extra label makes the disk foreign (RefuseForeign unless wipe).
+    // "Ours" requires EXACT label-set equality — exactly our three labels.
     let labels: Vec<&str> = on_disk.iter().map(|v| v.partition_label.as_str()).collect();
-    let is_ours = LABELS.iter().all(|l| labels.contains(l))
+    let is_ours = !on_disk.is_empty()
+        && LABELS.iter().all(|l| labels.contains(l))
         && labels.iter().all(|l| LABELS.contains(l));
-    if is_ours {
-        return ProvisionDecision::Skip;
-    }
 
-    if wipe {
+    // CONSERVATIVE SAFETY (revised after review): wipe == false is NEVER
+    // destructive. An empty discovered set does NOT mean "blank" — discovery is
+    // GPT-only and best-effort, so MBR/unreadable disks also produce no
+    // DiscoveredVolume. Anything not already exactly ours requires explicit wipe.
+    if is_ours {
+        ProvisionDecision::Skip
+    } else if wipe {
         ProvisionDecision::Provision
     } else {
         ProvisionDecision::RefuseForeign
@@ -1058,12 +1075,16 @@ impl Controller for VolumeProvisionerController {
     }
 
     fn inputs(&self) -> Vec<Input> {
-        // Re-evaluate when discovery changes.
-        vec![Input {
-            namespace: NS.to_string(),
-            typ: ResourceType::DiscoveredVolume,
-            kind: InputKind::Weak,
-        }]
+        // DiskStatus is the barrier signal (published last by discovery),
+        // DiscoveredVolume the content.
+        [ResourceType::DiskStatus, ResourceType::DiscoveredVolume]
+            .into_iter()
+            .map(|typ| Input {
+                namespace: NS.to_string(),
+                typ,
+                kind: InputKind::Weak,
+            })
+            .collect()
     }
 
     fn outputs(&self) -> Vec<Output> {
@@ -1078,6 +1099,19 @@ impl Controller for VolumeProvisionerController {
             return Ok(()); // no install target configured
         };
         let disk = install.disk.clone();
+        let leaf = disk.rsplit('/').next().unwrap_or(&disk);
+
+        // Discovery barrier: do nothing until discovery has scanned this disk
+        // (its DiskStatus, published AFTER its DiscoveredVolumes, is the signal).
+        // Without this, the provisioner's initial reconcile could read an empty
+        // pre-discovery store and mistake a foreign disk for blank.
+        if ctx
+            .state
+            .get(&Key::new(NS, ResourceType::DiskStatus, leaf))
+            .is_err()
+        {
+            return Ok(());
+        }
 
         let discovered: Vec<DiscoveredVolume> = ctx
             .state
