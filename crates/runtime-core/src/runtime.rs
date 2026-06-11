@@ -153,9 +153,14 @@ async fn controller_loop(
     // debounce below intentionally caps reconciles to ~one per DEBOUNCE window
     // under sustained input churn.
 
-    let mut resync = controller
-        .resync_interval()
-        .map(|d| tokio::time::interval_at(tokio::time::Instant::now() + d, d));
+    let mut resync = controller.resync_interval().map(|d| {
+        let mut iv = tokio::time::interval_at(tokio::time::Instant::now() + d, d);
+        // Skip missed ticks (a slow reconcile must not cause a catch-up burst):
+        // the contract is "reconcile at least every interval", not "once per
+        // elapsed interval".
+        iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        iv
+    });
 
     // Initial reconcile.
     reconcile_once(&mut controller, &ctx).await;
