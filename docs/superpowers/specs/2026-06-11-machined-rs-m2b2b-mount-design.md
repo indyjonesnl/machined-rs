@@ -87,8 +87,10 @@ A pure function in the controller module; the only volumes mounted are the three
      volume, via `reconcile_owned` (so a volume that disappears from `VolumeStatus` has its
      `MountStatus` GC'd).
   - **Idempotent**: an already-mounted target is not re-mounted; it is still reported `mounted: true`.
-  - On a mount error, publish `MountStatus{ mounted: false }` and return the error (retried next
-    reconcile).
+  - On a mount/`is_mounted` error, the reconcile returns the error (the level-triggered loop retries);
+    no `MountStatus` is published for the failed volume rather than a stale `mounted: false`. So a
+    `MountStatus` exists only for volumes that are actually mounted. (`MountStatus.mounted` is `true`
+    on every published status; the `bool` field is retained for forward use.)
 
 **No discovery-style barrier is needed.** An empty `VolumeStatus` set means "nothing to mount" — a
 harmless no-op (mounting is not destructive). The controller mounts each volume as its `VolumeStatus`
@@ -102,8 +104,9 @@ controller simply has nothing to do until `VolumeStatus` exists).
 
 ## 4. Error handling & observability
 
-- A mount failure is logged via `tracing` (controller `ctl` mapping to `runtime_core::Error`) and the
-  affected `MountStatus` is published with `mounted: false`; the level-triggered loop retries.
+- A mount failure maps (via `ctl`) to a `runtime_core::Error` and the reconcile returns it; the
+  level-triggered loop retries. No `MountStatus` is published for the failed volume (a present
+  `MountStatus` therefore always means actually-mounted).
 - `MountStatus` makes the mount state observable through the store (and the future API).
 
 ## 5. Testing strategy
