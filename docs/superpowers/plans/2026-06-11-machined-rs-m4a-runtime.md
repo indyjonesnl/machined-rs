@@ -1107,7 +1107,15 @@ async fn publishes_runtime_status() {
 }
 ```
 
-- [ ] **Step 4: Full gate + commit**
+- [ ] **Step 4: HERMETIC FIX (required) — boot fixtures must disable runtime injection**
+
+The boot tests (`sequencer/src/boot.rs::boot_mounts_and_starts_services` +
+`machined/tests/boot_harness.rs`) drive the REAL StartServices task; with `runtime: Default::default()`
+they now inject + actually spawn the host's `/usr/bin/containerd` (or fail where it doesn't exist).
+Set both fixtures to `runtime: RuntimeSection { disabled: true, ..Default::default() }` (import
+`RuntimeSection`) so tests never spawn the host runtime.
+
+- [ ] **Step 5: Full gate + commit**
 
 Run: `cargo test -p machined --test runtime` → PASS.
 Run: `make pre-commit` → fmt + clippy -D warnings + full workspace green (ignored stay ignored).
