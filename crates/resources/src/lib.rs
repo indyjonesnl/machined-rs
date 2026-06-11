@@ -5,6 +5,7 @@ pub mod block;
 pub mod metadata;
 pub mod network;
 pub mod resource;
+pub mod time;
 
 pub use block::{DiscoveredVolume, DiskStatus, MountStatus, VolumePhase, VolumeStatus};
 pub use metadata::{Key, Metadata, Phase, ResourceType};
@@ -13,3 +14,4 @@ pub use network::{
     ResolverSpec, RouteSpec, RouteStatus,
 };
 pub use resource::{MachineConfigSpec, Resource, ResourceObject, ServiceState, ServiceStatusSpec};
+pub use time::TimeStatus;

@@ -199,6 +199,7 @@ mod tests {
                     search: vec!["example.com".into()],
                 },
                 install: None,
+                time: Default::default(),
             },
         })
     }

@@ -19,6 +19,7 @@ machined-resources.workspace = true
 machined-runtime-core.workspace = true
 machined-sequencer.workspace = true
 machined-supervisor.workspace = true
+machined-time.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

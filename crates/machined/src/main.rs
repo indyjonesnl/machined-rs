@@ -15,6 +15,7 @@ use machined_controllers::network::{
     AddressController, HostnameController, LinkController, NetworkConfigController,
     ResolverController, RouteController,
 };
+use machined_controllers::time::TimeSyncController;
 use machined_platform::Platform;
 use machined_runtime_core::Runtime;
 use machined_sequencer::{boot_sequence, shutdown_sequence, SequencerCtx};
@@ -72,6 +73,17 @@ fn build_block_backend_for_discovery() -> Arc<dyn machined_block::BlockBackend> 
     #[cfg(not(target_os = "linux"))]
     {
         Arc::new(machined_block::FakeBlockBackend::new())
+    }
+}
+
+fn build_time_sync() -> Arc<dyn machined_time::TimeSync> {
+    #[cfg(target_os = "linux")]
+    {
+        Arc::new(machined_time::SntpTime::new())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Arc::new(machined_time::FakeTimeSync::new())
     }
 }
 
@@ -146,6 +158,11 @@ async fn run_daemon() -> anyhow::Result<()> {
         provider.clone(),
     )));
     runtime.register(Box::new(VolumeMountController::new(platform.clone())));
+
+    runtime.register(Box::new(TimeSyncController::new(
+        build_time_sync(),
+        provider.clone(),
+    )));
 
     let rt_token = shutdown.clone();
     let rt_handle = tokio::spawn(async move {

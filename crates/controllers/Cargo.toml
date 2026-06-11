@@ -12,6 +12,7 @@ machined-netlink.workspace = true
 machined-platform.workspace = true
 machined-resources.workspace = true
 machined-runtime-core.workspace = true
+machined-time.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 

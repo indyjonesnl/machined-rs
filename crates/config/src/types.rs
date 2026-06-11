@@ -29,6 +29,9 @@ pub struct MachineSection {
     /// Disk installation target + wipe policy.
     #[serde(default)]
     pub install: Option<InstallSection>,
+    /// Time-sync configuration.
+    #[serde(default)]
+    pub time: TimeSection,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -117,4 +120,15 @@ pub struct InstallSection {
     /// Wipe foreign data on the disk when provisioning. Defaults to false.
     #[serde(default)]
     pub wipe: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TimeSection {
+    /// NTP servers to query, in order. Empty → the controller's default pool.
+    #[serde(default)]
+    pub servers: Vec<String>,
+    /// Disable time sync entirely.
+    #[serde(default)]
+    pub disabled: bool,
 }

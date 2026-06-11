@@ -38,6 +38,7 @@ async fn pipeline_discovers_provisions_and_mounts() {
                 disk: "/dev/vda".into(),
                 wipe: true,
             }),
+            time: Default::default(),
         },
     };
 

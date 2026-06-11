@@ -135,6 +135,22 @@ machine:
     }
 
     #[test]
+    fn parses_time_section() {
+        let cfg =
+            load_from_str("machine:\n  time:\n    servers: [a.ntp, b.ntp]\n    disabled: true\n")
+                .unwrap();
+        assert_eq!(cfg.machine.time.servers, vec!["a.ntp", "b.ntp"]);
+        assert!(cfg.machine.time.disabled);
+    }
+
+    #[test]
+    fn time_defaults_empty_enabled() {
+        let cfg = load_from_str("machine: {}").unwrap();
+        assert!(cfg.machine.time.servers.is_empty());
+        assert!(!cfg.machine.time.disabled);
+    }
+
+    #[test]
     fn builds_resource_object() {
         let obj = to_resource("machine: {}".into());
         assert_eq!(obj.metadata.id, "machine-config");
