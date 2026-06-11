@@ -142,6 +142,7 @@ mod tests {
                     servers: servers.into_iter().map(|s| s.to_string()).collect(),
                     disabled,
                 },
+                runtime: Default::default(),
             },
         })
     }

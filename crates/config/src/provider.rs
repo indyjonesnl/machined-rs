@@ -1,7 +1,8 @@
 //! Read-only view over the machine config handed to controllers and tasks.
 
 use crate::types::{
-    InstallSection, MachineConfig, NetworkSection, ServiceConfig, Sysctl, TimeSection,
+    InstallSection, MachineConfig, NetworkSection, RuntimeSection, ServiceConfig, Sysctl,
+    TimeSection,
 };
 
 /// A read-only, cloneable snapshot view of the loaded config.
@@ -37,5 +38,9 @@ impl Provider {
 
     pub fn time(&self) -> &TimeSection {
         &self.config.machine.time
+    }
+
+    pub fn runtime(&self) -> &RuntimeSection {
+        &self.config.machine.runtime
     }
 }

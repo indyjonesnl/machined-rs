@@ -39,6 +39,7 @@ async fn pipeline_discovers_provisions_and_mounts() {
                 wipe: true,
             }),
             time: Default::default(),
+            runtime: Default::default(),
         },
     };
 

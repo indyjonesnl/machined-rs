@@ -37,6 +37,7 @@ async fn boots_supervises_and_shuts_down() {
             network: Default::default(),
             install: None,
             time: Default::default(),
+            runtime: Default::default(),
         },
     };
 

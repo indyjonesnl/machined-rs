@@ -413,6 +413,7 @@ mod controller_tests {
                     wipe,
                 }),
                 time: Default::default(),
+                runtime: Default::default(),
             },
         })
     }
