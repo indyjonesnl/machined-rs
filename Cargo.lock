@@ -824,6 +824,7 @@ dependencies = [
  "protoc-bin-vendored",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tonic",
  "tonic-build",
  "tracing",
