@@ -103,7 +103,9 @@ pub fn boot_sequence() -> PhaseList {
 mod tests {
     use super::*;
     use crate::task::SequencerCtx;
-    use machined_config::{MachineConfig, MachineSection, Provider, RestartPolicy, ServiceConfig};
+    use machined_config::{
+        MachineConfig, MachineSection, Provider, RestartPolicy, RuntimeSection, ServiceConfig,
+    };
     use machined_platform::{essential_mounts, FakePlatform};
     use machined_runtime_core::State;
     use machined_supervisor::ServiceManager;
@@ -127,7 +129,11 @@ mod tests {
                 network: Default::default(),
                 install: None,
                 time: Default::default(),
-                runtime: Default::default(),
+                // Hermetic test: never spawn the host containerd.
+                runtime: RuntimeSection {
+                    disabled: true,
+                    ..Default::default()
+                },
             },
         };
         let ctx = SequencerCtx {
