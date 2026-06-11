@@ -26,6 +26,23 @@ pub struct DiscoveredVolume {
     pub size_bytes: u64,
 }
 
+/// Lifecycle phase of a managed volume.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VolumePhase {
+    Provisioned,
+    Failed,
+}
+
+/// A managed volume the provisioner owns (EFI / STATE / EPHEMERAL).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VolumeStatus {
+    pub name: String,
+    pub device: String,
+    pub fs: String,
+    pub label: String,
+    pub phase: VolumePhase,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,5 +61,17 @@ mod tests {
             size_bytes: 512 * 2048,
         };
         assert_eq!(v.fs_type.as_deref(), Some("vfat"));
+    }
+
+    #[test]
+    fn volume_status_constructs() {
+        let v = VolumeStatus {
+            name: "STATE".into(),
+            device: "/dev/sda2".into(),
+            fs: "ext4".into(),
+            label: "STATE".into(),
+            phase: VolumePhase::Provisioned,
+        };
+        assert_eq!(v.phase, VolumePhase::Provisioned);
     }
 }
