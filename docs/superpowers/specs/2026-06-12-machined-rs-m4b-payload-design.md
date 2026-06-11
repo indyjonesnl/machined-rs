@@ -54,7 +54,9 @@ pub trait ReadinessCheck: Send + Sync {
     fn is_ready(&self, state: &State, dep_id: &str) -> bool;
 }
 
-/// Default: the dep's ServiceStatus exists, state == Running, healthy == true.
+/// Default: the dep's ServiceStatus exists and is (Running && healthy) OR
+/// Finished — a run-once dependency that completed successfully is satisfied
+/// (otherwise its dependents would wait forever). Failed/Waiting/absent → not ready.
 pub struct DefaultReadiness;
 ```
 
