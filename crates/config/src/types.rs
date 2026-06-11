@@ -26,6 +26,9 @@ pub struct MachineSection {
     /// Node network configuration.
     #[serde(default)]
     pub network: NetworkSection,
+    /// Disk installation target + wipe policy.
+    #[serde(default)]
+    pub install: Option<InstallSection>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -104,4 +107,14 @@ pub struct RouteConfig {
     pub via: IpAddr,
     #[serde(default)]
     pub metric: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstallSection {
+    /// The disk to provision, e.g. `/dev/sda`.
+    pub disk: String,
+    /// Wipe foreign data on the disk when provisioning. Defaults to false.
+    #[serde(default)]
+    pub wipe: bool,
 }
