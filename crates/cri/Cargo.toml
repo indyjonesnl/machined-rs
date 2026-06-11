@@ -1,0 +1,21 @@
+[package]
+name = "machined-cri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+prost.workspace = true
+tower.workspace = true
+hyper-util.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true
+protoc-bin-vendored.workspace = true
+
+[dev-dependencies]
+tokio-stream = { workspace = true, features = ["net"] }
