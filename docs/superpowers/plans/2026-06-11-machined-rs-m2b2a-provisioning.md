@@ -854,7 +854,10 @@ pub fn plan_provisioning(
     wipe: bool,
     discovered: &[DiscoveredVolume],
 ) -> ProvisionDecision {
-    // Match a discovered volume to this disk by parent-disk name or device path.
+    // Match by EXACT parent-disk name (the bare name SysfsBlock reports, e.g.
+    // "sda") or exact device path. Exact equality is deliberate: "sda" must never
+    // match "sda1"/"sdaa", and a missed match on a foreign disk could make it look
+    // blank and get wiped.
     let leaf = install_disk.rsplit('/').next().unwrap_or(install_disk);
     let on_disk: Vec<&DiscoveredVolume> = discovered
         .iter()
@@ -865,6 +868,8 @@ pub fn plan_provisioning(
         return ProvisionDecision::Provision; // blank disk
     }
 
+    // EXACT label-set equality. Labels are the sole trust anchor: any foreign/
+    // extra label makes the disk foreign (RefuseForeign unless wipe).
     let labels: Vec<&str> = on_disk.iter().map(|v| v.partition_label.as_str()).collect();
     let is_ours = LABELS.iter().all(|l| labels.contains(l))
         && labels.iter().all(|l| LABELS.contains(l));
@@ -972,6 +977,54 @@ mod guard_tests {
         assert_eq!(
             plan_provisioning("/dev/sda", false, &d),
             ProvisionDecision::Provision
+        );
+    }
+
+    #[test]
+    fn our_layout_plus_foreign_partition_refuses() {
+        // Our 3 labels PLUS a foreign 4th → NOT our exact set → refuse (not Skip).
+        let d = vec![
+            vol("sda", "EFI"),
+            vol("sda", "STATE"),
+            vol("sda", "EPHEMERAL"),
+            vol("sda", "RECOVERY"),
+        ];
+        assert_eq!(
+            plan_provisioning("/dev/sda", false, &d),
+            ProvisionDecision::RefuseForeign
+        );
+    }
+
+    #[test]
+    fn similar_disk_name_does_not_match() {
+        // Regression guard: "sda" must NOT match "sda1"/"sdaa" → reads as blank.
+        let d = vec![vol("sdaa", "WINDOWS"), vol("sda1", "DATA")];
+        assert_eq!(
+            plan_provisioning("/dev/sda", false, &d),
+            ProvisionDecision::Provision
+        );
+    }
+
+    #[test]
+    fn our_layout_with_foreign_on_other_disk_skips() {
+        let d = vec![
+            vol("sda", "EFI"),
+            vol("sda", "STATE"),
+            vol("sda", "EPHEMERAL"),
+            vol("sdb", "WINDOWS"),
+        ];
+        assert_eq!(
+            plan_provisioning("/dev/sda", false, &d),
+            ProvisionDecision::Skip
+        );
+    }
+
+    #[test]
+    fn nvme_leaf_extraction() {
+        let d = vec![vol("nvme0n1", "WINDOWS")];
+        assert_eq!(
+            plan_provisioning("/dev/nvme0n1", false, &d),
+            ProvisionDecision::RefuseForeign
         );
     }
 }
