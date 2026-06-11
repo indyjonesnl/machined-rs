@@ -86,3 +86,77 @@ async fn lists_seeded_resources_over_plaintext() {
         .iter()
         .any(|f| f.key == "service_id" && f.value == "etcd"));
 }
+
+#[tokio::test]
+async fn mtls_requires_a_valid_client_cert() {
+    use machined_apiserver::pb::machine_service_client::MachineServiceClient;
+    use machined_apiserver::pb::Empty;
+    use machined_pki::NodePki;
+    use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
+
+    let dir = std::env::temp_dir().join(format!("mnd-api-tls-{}", std::process::id()));
+    let pki = NodePki::load_or_generate(&dir, "node", &["127.0.0.1".into()]).unwrap();
+    let ca = pki.ca_pem();
+    let client_id = pki.issue_client("admin").unwrap();
+
+    let state = State::new();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    let pki_moved = pki;
+    tokio::spawn(async move {
+        let tls = {
+            use tonic::transport::{Identity as Id, ServerTlsConfig};
+            let (c, k) = pki_moved.server_identity();
+            ServerTlsConfig::new()
+                .identity(Id::from_pem(c, k))
+                .client_ca_root(Certificate::from_pem(pki_moved.ca_pem()))
+        };
+        let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
+            machined_apiserver::Machine::new(state, "9.9.9"),
+        );
+        Server::builder()
+            .tls_config(tls)
+            .unwrap()
+            .add_service(svc)
+            .serve_with_incoming(incoming)
+            .await
+            .unwrap();
+    });
+    tokio::time::sleep(Duration::from_millis(80)).await;
+
+    // Authorized client (CA-signed cert) succeeds.
+    let tls = ClientTlsConfig::new()
+        .ca_certificate(Certificate::from_pem(&ca))
+        .identity(Identity::from_pem(&client_id.cert_pem, &client_id.key_pem))
+        .domain_name("127.0.0.1");
+    let channel = Endpoint::from_shared(format!("https://{addr}"))
+        .unwrap()
+        .tls_config(tls)
+        .unwrap()
+        .connect()
+        .await
+        .unwrap();
+    let mut client = MachineServiceClient::new(channel);
+    let resp = client.version(Empty {}).await.unwrap().into_inner();
+    assert_eq!(resp.version, "9.9.9");
+
+    // Unauthenticated client (no client identity) is rejected at the handshake.
+    let tls_no_id = ClientTlsConfig::new()
+        .ca_certificate(Certificate::from_pem(&ca))
+        .domain_name("127.0.0.1");
+    let bad = Endpoint::from_shared(format!("https://{addr}"))
+        .unwrap()
+        .tls_config(tls_no_id)
+        .unwrap()
+        .connect()
+        .await;
+    assert!(
+        bad.is_err() || {
+            let mut c = MachineServiceClient::new(bad.unwrap());
+            c.version(Empty {}).await.is_err()
+        }
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}

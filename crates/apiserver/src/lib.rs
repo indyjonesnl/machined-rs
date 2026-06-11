@@ -32,8 +32,12 @@ pub async fn serve(
         .await
 }
 
-/// Build the mutual-TLS config (server identity + required client CA). Filled in
-/// Task 4; for Task 2 it is plaintext so the codegen/transport can be validated.
-fn server_tls(_pki: &NodePki) -> tonic::transport::ServerTlsConfig {
-    tonic::transport::ServerTlsConfig::new()
+/// Build the mutual-TLS config: the node's server identity plus the node CA as
+/// the required client-certificate root (so only CA-signed clients connect).
+fn server_tls(pki: &NodePki) -> tonic::transport::ServerTlsConfig {
+    use tonic::transport::{Certificate, Identity, ServerTlsConfig};
+    let (cert, key) = pki.server_identity();
+    ServerTlsConfig::new()
+        .identity(Identity::from_pem(cert, key))
+        .client_ca_root(Certificate::from_pem(pki.ca_pem()))
 }
