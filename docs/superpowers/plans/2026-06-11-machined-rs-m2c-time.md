@@ -360,10 +360,13 @@ Append to the `tests` module in `crates/config/src/load.rs`:
 
 - [ ] **Step 5: Update the four `MachineSection { ... }` literals**
 
-Adding `time` makes the explicit literals non-exhaustive (E0063). Add `time: Default::default(),`
-(after the `install:` field) to the `MachineSection { ... }` literal in: `crates/sequencer/src/boot.rs`,
-`crates/machined/tests/boot_harness.rs`, `crates/machined/tests/network.rs`, and
-`crates/controllers/src/network/config_controller.rs` (the `provider()` helper).
+Adding `time` makes every explicit literal non-exhaustive (E0063). Add `time: Default::default(),`
+(after the `install:` field) to EVERY `MachineSection { ... }` literal. `grep -rl 'MachineSection {'
+crates` finds all sites — there are **seven** (M2b added several): `crates/sequencer/src/boot.rs`,
+`crates/machined/tests/{boot_harness,network,mount,provision}.rs`,
+`crates/controllers/src/network/config_controller.rs` (the `provider()` helper), and
+`crates/controllers/src/block/provision.rs` (its `provider()` helper). Run `cargo build --workspace`
+and fix any remaining E0063.
 
 - [ ] **Step 6: Test + clippy + commit**
 
