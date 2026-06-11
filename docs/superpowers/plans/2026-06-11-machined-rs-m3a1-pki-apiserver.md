@@ -53,7 +53,9 @@ crates/apiserver/tests/grpc.rs  # NEW: mTLS integration test
 In root `Cargo.toml`, add `"crates/pki"` to `members`; add to `[workspace.dependencies]`:
 
 ```toml
-rcgen = "0.13"
+# x509-parser feature is REQUIRED: CertificateParams::from_ca_cert_pem (used to
+# re-import the CA before signing leaves) is gated behind it in rcgen 0.13.
+rcgen = { version = "0.13", features = ["x509-parser"] }
 
 machined-pki = { path = "crates/pki" }
 ```
