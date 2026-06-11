@@ -548,14 +548,16 @@ git commit -m "feat(block): BlockProvisioner trait + fake provisioning simulatio
 
 - [ ] **Step 1: Add the nix dep for the BLKRRPART ioctl**
 
-In `crates/block/Cargo.toml`, under `[target.'cfg(target_os = "linux")'.dependencies]`, add:
+In `crates/block/Cargo.toml`, under `[target.'cfg(target_os = "linux")'.dependencies]`, add BOTH:
 
 ```toml
 nix = { workspace = true }
+tokio = { workspace = true }
 ```
 
-(The workspace already declares `nix` with the `mount,signal,process,hostname,reboot` features. If the
-ioctl macro needs the `ioctl` feature, the spike adds it to the workspace `nix` features and notes it.)
+`tokio` is needed by `format`'s `tokio::process` (it was only a dev-dep before). And the
+`nix::ioctl_none!` macro requires the `ioctl` feature: add `"ioctl"` to the workspace `nix` features
+in the root `Cargo.toml` (CONFIRMED needed in nix 0.29 — the `sys::ioctl` module is gated behind it).
 
 - [ ] **Step 2: Implement BlockProvisioner for SysfsBlock**
 
@@ -643,10 +645,18 @@ impl BlockProvisioner for SysfsBlock {
                 PartType::EfiSystem => gpt::partition_types::EFI,
                 PartType::LinuxFilesystem => gpt::partition_types::LINUX_FS,
             };
-            // size 0 → use the rest by passing the remaining free space.
+            // size 0 → use the rest: the largest free run, in bytes. INVARIANT:
+            // a size-0 entry must be the LAST partition in the plan (it claims all
+            // remaining free space). fixed_layout() upholds this (EPHEMERAL only).
+            let lb = u64::from(*gdisk.logical_block_size());
             let size = if p.size_bytes == 0 {
-                gdisk.find_free_sectors().into_iter().map(|(_, len)| len).max().unwrap_or(0)
-                    * u64::from(*gdisk.logical_block_size())
+                gdisk
+                    .find_free_sectors()
+                    .into_iter()
+                    .map(|(_, len)| len)
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_mul(lb)
             } else {
                 p.size_bytes
             };
