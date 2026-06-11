@@ -19,6 +19,8 @@ pub enum ResourceType {
     LinkStatus,
     AddressStatus,
     RouteStatus,
+    DiskStatus,
+    DiscoveredVolume,
 }
 
 impl fmt::Display for ResourceType {
@@ -34,6 +36,8 @@ impl fmt::Display for ResourceType {
             ResourceType::LinkStatus => "LinkStatus",
             ResourceType::AddressStatus => "AddressStatus",
             ResourceType::RouteStatus => "RouteStatus",
+            ResourceType::DiskStatus => "DiskStatus",
+            ResourceType::DiscoveredVolume => "DiscoveredVolume",
         };
         f.write_str(s)
     }
