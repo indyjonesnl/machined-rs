@@ -377,6 +377,11 @@ impl FakeBlockBackend {
     }
 }
 
+/// The bare device name from a path or name (`/dev/sda` -> `sda`).
+fn disk_leaf(disk: &str) -> String {
+    disk.rsplit('/').next().unwrap_or(disk).to_string()
+}
+
 fn part_device(disk: &str, num: usize) -> String {
     let sep = if disk.chars().last().is_some_and(|c| c.is_ascii_digit()) {
         "p"
@@ -402,20 +407,24 @@ impl BlockProvisioner for FakeBlockBackend {
     async fn wipe(&self, disk: &str) -> Result<()> {
         let mut st = self.state.lock().unwrap();
         st.wipes.push(disk.to_string());
-        st.volumes.retain(|v| v.disk != disk);
+        let leaf = disk_leaf(disk);
+        st.volumes.retain(|v| v.disk != leaf);
         Ok(())
     }
 
     async fn create_partitions(&self, disk: &str, plan: &[PartitionPlan]) -> Result<Vec<String>> {
         let mut st = self.state.lock().unwrap();
         st.creates.push(disk.to_string());
+        // Mirror SysfsBlock: VolumeInfo.disk is the bare device name (e.g. "sda"),
+        // while device is the full /dev path.
+        let leaf = disk_leaf(disk);
         let mut devices = Vec::new();
         for (i, p) in plan.iter().enumerate() {
             let device = part_device(disk, i + 1);
             devices.push(device.clone());
             st.volumes.push(VolumeInfo {
                 device,
-                disk: disk.to_string(),
+                disk: leaf.clone(),
                 partition_uuid: format!("uuid-{}", i + 1),
                 partition_label: p.label.clone(),
                 partition_type_guid: p.part_type.type_guid().to_string(),
