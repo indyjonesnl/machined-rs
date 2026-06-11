@@ -66,8 +66,10 @@ crates/machined/tests/runtime.rs  # NEW: e2e (fake CRI → RuntimeStatus ready)
 Root `Cargo.toml`: add `"crates/cri"` to members; to `[workspace.dependencies]` add:
 
 ```toml
-tower = "0.4"
-hyper-util = "0.1"
+# Feature flags CONFIRMED required: tower's service_fn is behind `util`;
+# hyper-util's TokioIo is behind `tokio` (both crates default to ~nothing).
+tower = { version = "0.4", features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 
 machined-cri = { path = "crates/cri" }
 ```
