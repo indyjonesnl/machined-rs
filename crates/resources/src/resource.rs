@@ -7,6 +7,7 @@ use crate::network::{
     AddressSpec, AddressStatus, HostnameSpec, LinkSpec, LinkStatus, ResolverSpec, RouteSpec,
     RouteStatus,
 };
+use crate::time::TimeStatus;
 
 /// Spec for the loaded machine configuration, surfaced as a resource so
 /// controllers reconcile against it via the normal watch path.
@@ -53,6 +54,7 @@ pub enum Resource {
     DiscoveredVolume(DiscoveredVolume),
     VolumeStatus(VolumeStatus),
     MountStatus(MountStatus),
+    TimeStatus(TimeStatus),
 }
 
 impl Resource {
@@ -73,6 +75,7 @@ impl Resource {
             Resource::DiscoveredVolume(_) => ResourceType::DiscoveredVolume,
             Resource::VolumeStatus(_) => ResourceType::VolumeStatus,
             Resource::MountStatus(_) => ResourceType::MountStatus,
+            Resource::TimeStatus(_) => ResourceType::TimeStatus,
         }
     }
 }

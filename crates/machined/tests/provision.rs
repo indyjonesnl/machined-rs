@@ -36,6 +36,7 @@ async fn provisions_install_disk_after_discovery_barrier() {
                 // Blank-looking disk requires explicit wipe to provision.
                 wipe: true,
             }),
+            time: Default::default(),
         },
     };
 

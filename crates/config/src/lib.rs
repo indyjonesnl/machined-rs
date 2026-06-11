@@ -8,5 +8,5 @@ pub use load::{load_from_str, ConfigError};
 pub use provider::Provider;
 pub use types::{
     InstallSection, InterfaceConfig, MachineConfig, MachineSection, NetworkSection, RestartPolicy,
-    RouteConfig, ServiceConfig, Sysctl,
+    RouteConfig, ServiceConfig, Sysctl, TimeSection,
 };

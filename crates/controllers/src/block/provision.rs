@@ -412,6 +412,7 @@ mod controller_tests {
                     disk: disk.into(),
                     wipe,
                 }),
+                time: Default::default(),
             },
         })
     }

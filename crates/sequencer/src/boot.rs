@@ -113,6 +113,7 @@ mod tests {
                 }],
                 network: Default::default(),
                 install: None,
+                time: Default::default(),
             },
         };
         let ctx = SequencerCtx {

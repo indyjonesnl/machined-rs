@@ -41,6 +41,7 @@ async fn config_drives_network_through_controllers() {
                 search: vec![],
             },
             install: None,
+            time: Default::default(),
         },
     };
 
