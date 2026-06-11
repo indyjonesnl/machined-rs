@@ -81,10 +81,11 @@ impl Task for StartServices {
         }
         let services = machined_config::effective_services(rt, ctx.provider.services());
         let mut mgr = ctx.services.lock().await;
-        mgr.start_all(&services).map_err(|message| TaskError {
-            task: self.name().into(),
-            message,
-        })
+        mgr.start_all(&services, ctx.readiness.clone())
+            .map_err(|message| TaskError {
+                task: self.name().into(),
+                message,
+            })
     }
 }
 
@@ -108,7 +109,7 @@ mod tests {
     };
     use machined_platform::{essential_mounts, FakePlatform};
     use machined_runtime_core::State;
-    use machined_supervisor::ServiceManager;
+    use machined_supervisor::{DefaultReadiness, ServiceManager};
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -141,6 +142,7 @@ mod tests {
             platform: platform.clone(),
             provider: Provider::new(cfg),
             services: Arc::new(Mutex::new(ServiceManager::new(state.clone()))),
+            readiness: Arc::new(DefaultReadiness),
         };
 
         boot_sequence().run(&ctx).await.unwrap();

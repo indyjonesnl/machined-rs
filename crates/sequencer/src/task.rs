@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use machined_config::Provider;
 use machined_platform::Platform;
 use machined_runtime_core::State;
-use machined_supervisor::ServiceManager;
+use machined_supervisor::{ReadinessCheck, ServiceManager};
 use tokio::sync::Mutex;
 use tracing::info;
 
@@ -27,6 +27,7 @@ pub struct SequencerCtx {
     pub platform: Arc<dyn Platform>,
     pub provider: Provider,
     pub services: Arc<Mutex<ServiceManager>>,
+    pub readiness: Arc<dyn ReadinessCheck>,
 }
 
 /// A single step in a sequence. Tasks *should* be written to be idempotent

@@ -30,7 +30,7 @@ mod tests {
     use machined_config::{MachineConfig, Provider};
     use machined_platform::FakePlatform;
     use machined_runtime_core::State;
-    use machined_supervisor::ServiceManager;
+    use machined_supervisor::{DefaultReadiness, ServiceManager};
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
@@ -42,6 +42,7 @@ mod tests {
             platform: Arc::new(FakePlatform::new()),
             provider: Provider::new(MachineConfig::default()),
             services: Arc::new(Mutex::new(ServiceManager::new(state))),
+            readiness: Arc::new(DefaultReadiness),
         };
         shutdown_sequence().run(&ctx).await.unwrap();
     }

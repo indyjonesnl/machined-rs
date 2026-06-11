@@ -11,6 +11,13 @@ payload, not a dependency.
 Milestone M0 (the `runtime-core` reconcile foundation) — complete.
 See `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 
+### Running a payload
+
+machined supervises an external containerd and health-checks it over CRI. Any
+config-declared service with `depends_on: [containerd]` starts only once the
+runtime is genuinely ready (process up **and** CRI `RuntimeReady`). See
+`docs/examples/node-with-kubelet.yaml` for a Kubernetes-payload example.
+
 ## Build
 
 ```bash

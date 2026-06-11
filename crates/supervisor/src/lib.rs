@@ -11,7 +11,9 @@ pub mod restart;
 pub use restart::{Policy, RestartRunner};
 
 pub mod manager;
+pub mod readiness;
 pub mod service;
 
 pub use manager::{start_order, ServiceManager};
+pub use readiness::{DefaultReadiness, ReadinessCheck};
 pub use service::{publish_status, run_service};

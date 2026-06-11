@@ -1,0 +1,15 @@
+# Example machined-rs node config with a Kubernetes payload.
+# machined is payload-agnostic: the kubelet below is any binary you ship in the
+# image (a rusternetes kubelet is shown). `depends_on: [containerd]` is
+# health-gated — the payload starts only when the machined-managed containerd
+# is running AND its CRI reports RuntimeReady.
+machine:
+  hostname: node-1
+  install:
+    disk: /dev/sda
+    wipe: false
+  services:
+    - id: kubelet
+      command: [/usr/bin/rusternetes-kubelet, --node-name, node-1]
+      depends_on: [containerd]
+      restart: always

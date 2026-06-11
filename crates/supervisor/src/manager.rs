@@ -2,6 +2,7 @@
 //! a background task) and stops them in reverse order on shutdown.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use machined_config::{RestartPolicy, ServiceConfig};
 use machined_runtime_core::State;
@@ -9,6 +10,7 @@ use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use crate::process::ProcessRunner;
+use crate::readiness::{wait_for_deps, ReadinessCheck};
 use crate::restart::{Policy, RestartRunner};
 use crate::service::run_service;
 
@@ -80,10 +82,14 @@ impl ServiceManager {
         }
     }
 
-    /// Start every service as a background task, in dependency order. For M1
-    /// this spawns all in order without blocking on readiness (health-gated
-    /// start lands in M3).
-    pub fn start_all(&mut self, services: &[ServiceConfig]) -> Result<(), String> {
+    /// Start every service as a background task, in dependency order. Each
+    /// task first waits (publishing Waiting) until `check` reports all of its
+    /// depends_on ready, then runs the service.
+    pub fn start_all(
+        &mut self,
+        services: &[ServiceConfig],
+        check: Arc<dyn ReadinessCheck>,
+    ) -> Result<(), String> {
         let order = start_order(services)?;
         let by_id: HashMap<&str, &ServiceConfig> =
             services.iter().map(|s| (s.id.as_str(), s)).collect();
@@ -91,12 +97,16 @@ impl ServiceManager {
         for id in order {
             let cfg = by_id[id.as_str()];
             let state = self.state.clone();
+            let deps = cfg.depends_on.clone();
+            let check = check.clone();
+            let sid = cfg.id.clone();
             let runner = RestartRunner::new(
                 ProcessRunner::new(cfg.id.clone(), cfg.command.clone()),
                 policy_of(cfg.restart),
             );
             info!(service = %cfg.id, "starting service");
             let handle = tokio::spawn(async move {
+                wait_for_deps(&state, check.as_ref(), &sid, &deps).await;
                 run_service(&state, runner).await;
             });
             self.handles.push((cfg.id.clone(), handle));
@@ -160,12 +170,15 @@ mod tests {
         let state = State::new();
         let mut mgr = ServiceManager::new(state.clone());
         // A short-lived service so the task finishes quickly.
-        mgr.start_all(&[ServiceConfig {
-            id: "blip".into(),
-            command: vec!["true".into()],
-            depends_on: vec![],
-            restart: RestartPolicy::Never,
-        }])
+        mgr.start_all(
+            &[ServiceConfig {
+                id: "blip".into(),
+                command: vec!["true".into()],
+                depends_on: vec![],
+                restart: RestartPolicy::Never,
+            }],
+            Arc::new(crate::readiness::DefaultReadiness),
+        )
         .unwrap();
 
         // Give the task time to publish + run.
