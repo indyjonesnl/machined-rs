@@ -97,45 +97,67 @@ Defined as a constant `fn fixed_layout() -> Vec<PartitionPlan>` in the controlle
 plan_provisioning(install_disk: &str, wipe: bool, discovered: &[DiscoveredVolume]) -> ProvisionDecision
 
 ProvisionDecision =
-    Skip                  // the disk already carries our exact layout (STATE + EPHEMERAL + EFI
-                          //   labels present) — idempotent no-op
-  | Provision             // the disk is blank (no discovered volumes), OR wipe == true
-  | RefuseForeign         // the disk has partitions/filesystems that are NOT our layout, and
-                          //   wipe == false — refuse; do not touch
+    Skip                  // the disk already carries our exact layout (EFI + STATE + EPHEMERAL,
+                          //   and nothing else) — idempotent no-op
+  | Provision             // wipe == true and the disk is not already ours — lay out fresh
+  | RefuseForeign         // wipe == false and the disk is not already ours — refuse; do not touch
 ```
 
-Rules (evaluated against only the volumes whose `disk` == `install_disk`):
-- **No volumes on the disk** → `Provision` (blank disk, safe).
-- **Exactly our labels present** (EFI + STATE + EPHEMERAL) → `Skip` (already provisioned).
-- **Any other / partial / foreign volumes present**:
+Rules (evaluated against only the volumes whose `disk` == `install_disk`, matched by EXACT
+parent-disk name):
+- **Exactly our labels present** (EFI + STATE + EPHEMERAL, and no others) → `Skip`.
+- **Anything else** (blank-looking / partial / foreign):
   - `wipe == true` → `Provision`.
   - `wipe == false` → `RefuseForeign`.
+
+**CONSERVATIVE SAFETY (revised after review):** `wipe == false` is **never destructive** — it yields
+only `Skip` or `RefuseForeign`. The earlier "blank disk → Provision without wipe" rule was **unsafe**:
+discovery is GPT-only and best-effort, so an MBR disk, an unreadable disk, or a disk discovery simply
+hasn't scanned yet all *look* blank (no `DiscoveredVolume`) — auto-provisioning them would destroy
+real foreign data under `wipe:false`. Therefore provisioning **any** disk not already carrying our
+exact layout requires explicit `install.wipe: true` (like Talos's explicit install). The absence of a
+GPT layout is treated as "unknown, possibly foreign", not "blank".
 
 This function is **pure** (no I/O) and is the single source of the destructive decision. It is tested
 exhaustively; the controller's only destructive code runs strictly inside the `Provision` branch.
 
 ### 3.5 `VolumeProvisionerController`
 
-- Inputs: `MachineConfig` (for `install`) + `DiscoveredVolume` (from M2b-1). Strong is unnecessary
-  (no teardown of discovery); declared `Weak` so a discovery change re-evaluates.
+- Inputs: `DiscoveredVolume` + `DiskStatus` (both from M2b-1 discovery), declared `Weak` so the
+  provisioner re-evaluates when discovery publishes.
 - Outputs: `VolumeStatus` (Exclusive, owned via `reconcile_owned`).
 - Reconcile:
-  1. If `install.disk` is empty/unset → nothing to do (publish no volumes).
-  2. `decision = plan_provisioning(install.disk, install.wipe, discovered)`.
-  3. `RefuseForeign` → `error!` with the disk + the foreign volumes; return an error (a fatal
-     boot-time condition; do **not** partition). Publish no volumes.
-  4. `Skip` → publish `VolumeStatus(Provisioned)` for EFI/STATE/EPHEMERAL from the discovered volumes.
-  5. `Provision` → `wipe` (only if the disk had foreign volumes) → `create_partitions(fixed_layout())`
-     → `format` each partition → publish `VolumeStatus(Provisioned)` per volume. On any backend
-     error, publish `VolumeStatus(Failed)` for the affected volume and return the error (retried next
-     reconcile; operations are idempotent — re-running `create_partitions`/`format` on an
-     already-correct disk is safe, and the guard will `Skip` once labels are present).
+  1. If `install.disk` is empty/unset → nothing to do.
+  2. **Discovery barrier:** if the install disk's `DiskStatus` is **not** present in the store →
+     no-op (return `Ok`, quietly). Discovery has not yet scanned this disk (or it is absent), and the
+     empty `DiscoveredVolume` set must **not** be read as "blank". This closes the boot race where the
+     provisioner's initial reconcile could run before discovery populates the store.
+  3. `decision = plan_provisioning(install.disk, install.wipe, discovered)`.
+  4. `RefuseForeign` → `error!` with the disk; return an error (a deliberate halt; do **not** touch).
+  5. `Skip` → publish `VolumeStatus(Provisioned)` for EFI/STATE/EPHEMERAL from the discovered volumes.
+  6. `Provision` → `wipe` (if the disk had any discovered volumes) → `create_partitions(fixed_layout())`
+     → `format` each → publish `VolumeStatus(Provisioned)` per volume. Idempotent: once our labels are
+     present the guard returns `Skip`, so a retry after partial failure re-converges.
 
-### 3.6 Wiring
+### 3.6 Discovery barrier (the boot-race fix)
 
-`machined::run_daemon` registers `VolumeProvisionerController` after the discovery controller (so the
-initial discovery has populated `DiscoveredVolume` before provisioning evaluates), using the same
-block backend instance.
+The provisioner must not act on an empty store before discovery has run. Two changes provide a clean
+happens-after barrier using the existing `DiskStatus` resource:
+
+1. **`DiskDiscoveryController` publishes `DiscoveredVolume` BEFORE `DiskStatus`** within its reconcile
+   (both `await`s complete first, then the two `reconcile_owned` calls run back-to-back with no
+   `await` between them). So **`DiskStatus` present ⇒ that scan's `DiscoveredVolume`s are already in
+   the store.**
+2. The provisioner declares `DiskStatus` as a `Weak` input and **gates on the install disk's
+   `DiskStatus` being present** (step 2 above). It therefore only ever evaluates `plan_provisioning`
+   against a discovered view that reflects a completed scan — never an empty pre-discovery store.
+
+### 3.7 Wiring
+
+`machined::run_daemon` registers `DiskDiscoveryController` then `VolumeProvisionerController` into the
+runtime. Order no longer carries a correctness requirement (the barrier handles ordering); the
+controllers run as independent reconcile loops and the provisioner waits for the `DiskStatus` barrier
+regardless of spawn order.
 
 ## 4. Error handling & observability
 
