@@ -307,12 +307,14 @@ async fn run_daemon() -> anyhow::Result<()> {
     // Stop the runtime and join.
     shutdown.cancel();
     let _ = rt_handle.await;
-    if let Some(h) = api_handle {
-        if tokio::time::timeout(std::time::Duration::from_secs(5), h)
+    if let Some(mut h) = api_handle {
+        if tokio::time::timeout(std::time::Duration::from_secs(5), &mut h)
             .await
             .is_err()
         {
-            warn!("api server did not shut down in time");
+            warn!("api server did not shut down in time; aborting");
+            h.abort();
+            let _ = h.await;
         }
     }
     info!("machined stopped");

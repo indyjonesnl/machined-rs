@@ -9,6 +9,9 @@ pub struct Recorded {
     pub mounts: Vec<MountSpec>,
     pub unmounts: Vec<String>,
     pub syncs: u32,
+    /// Interleaved disk-op log ("sync", "unmount:<target>") so tests can pin
+    /// cross-op ordering (e.g. sync-before-unmount), not just per-op order.
+    pub disk_ops: Vec<String>,
     pub sysctls: Vec<(String, String)>,
     pub hostname: Option<String>,
     pub rebooted: bool,
@@ -63,10 +66,13 @@ impl Platform for FakePlatform {
         let mut rec = self.recorded.lock().unwrap();
         rec.mounts.retain(|m| m.target != target);
         rec.unmounts.push(target.to_string());
+        rec.disk_ops.push(format!("unmount:{target}"));
         Ok(())
     }
     fn sync(&self) {
-        self.recorded.lock().unwrap().syncs += 1;
+        let mut rec = self.recorded.lock().unwrap();
+        rec.syncs += 1;
+        rec.disk_ops.push("sync".to_string());
     }
     fn reboot(&self) -> Result<()> {
         self.recorded.lock().unwrap().rebooted = true;

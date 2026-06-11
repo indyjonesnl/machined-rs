@@ -90,5 +90,10 @@ mod tests {
         assert_eq!(rec.syncs, 1);
         // Reverse mount order, /boot was never mounted so it is untouched.
         assert_eq!(rec.unmounts, vec!["/var", "/system/state"]);
+        // The interleaved log pins sync STRICTLY BEFORE the unmounts.
+        assert_eq!(
+            rec.disk_ops,
+            vec!["sync", "unmount:/var", "unmount:/system/state"]
+        );
     }
 }
