@@ -188,6 +188,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn falls_over_to_second_server() {
+        // First server unreachable (no offset), second answers → synced on "b".
+        let fake = Arc::new(FakeTimeSync::new().with_offset("b:123", 500_000_000));
+        let state = State::new();
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
+        let mut c = TimeSyncController::new(fake.clone(), provider(vec!["a", "b"], false));
+        c.reconcile(&ctx).await.unwrap();
+        let st = time_status(&state);
+        assert!(st.synced);
+        assert_eq!(st.server, "b");
+        assert_eq!(fake.steps(), vec![500_000_000]);
+    }
+
+    #[tokio::test]
     async fn disabled_does_not_query() {
         let fake = Arc::new(FakeTimeSync::new().with_offset("a:123", 500_000_000));
         let state = State::new();
