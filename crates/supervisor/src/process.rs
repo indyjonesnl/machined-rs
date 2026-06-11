@@ -1,6 +1,7 @@
 //! `Runner` backend that forks/execs a host process via `tokio::process`.
 
 use async_trait::async_trait;
+use std::sync::{Arc, Mutex};
 use tokio::process::{Child, Command};
 use tracing::warn;
 
@@ -10,6 +11,9 @@ pub struct ProcessRunner {
     id: String,
     command: Vec<String>,
     child: Option<Child>,
+    /// Shared view of the live child PID (None when not running). The manager
+    /// reads it to deliver SIGTERM during graceful stop.
+    pid_slot: Arc<Mutex<Option<u32>>>,
 }
 
 impl ProcessRunner {
@@ -19,7 +23,13 @@ impl ProcessRunner {
             id: id.into(),
             command,
             child: None,
+            pid_slot: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Handle the manager uses to signal the live child.
+    pub fn pid_slot(&self) -> Arc<Mutex<Option<u32>>> {
+        self.pid_slot.clone()
     }
 }
 
@@ -39,7 +49,7 @@ impl Runner for ProcessRunner {
             .args(args)
             // Kill the child if its task is aborted/dropped, so shutdown
             // (which aborts the supervising task) does not orphan the process
-            // onto PID 1. Graceful SIGTERM + grace timeout lands in M5.
+            // onto PID 1; the manager delivers SIGTERM + grace before that kill.
             .kill_on_drop(true)
             .spawn()
             .map_err(|source| RunnerError::Spawn {
@@ -47,6 +57,7 @@ impl Runner for ProcessRunner {
                 source,
             })?;
         self.child = Some(child);
+        *self.pid_slot.lock().unwrap() = self.child.as_ref().unwrap().id();
 
         let status = self
             .child
@@ -56,6 +67,7 @@ impl Runner for ProcessRunner {
             .await
             .map_err(|e| RunnerError::Other(format!("wait {}: {e}", self.id)))?;
         self.child = None;
+        *self.pid_slot.lock().unwrap() = None;
 
         Ok(if status.success() {
             RunOutcome::Success
@@ -67,7 +79,7 @@ impl Runner for ProcessRunner {
     async fn stop(&mut self) -> crate::runner::Result<()> {
         if let Some(child) = self.child.as_mut() {
             // tokio's start_kill sends SIGKILL; for M1 that is acceptable.
-            // M5 replaces this with SIGTERM + grace timeout + SIGKILL.
+            // Direct kill; the graceful path lives in ServiceManager::stop_all.
             if let Err(e) = child.start_kill() {
                 warn!(service = %self.id, "kill failed: {e}");
             }

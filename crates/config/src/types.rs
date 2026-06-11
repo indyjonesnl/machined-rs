@@ -57,6 +57,9 @@ pub struct ServiceConfig {
     /// Restart policy on exit.
     #[serde(default)]
     pub restart: RestartPolicy,
+    /// Seconds to wait after SIGTERM before SIGKILL on stop. Default 10.
+    #[serde(default)]
+    pub stop_grace_secs: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]

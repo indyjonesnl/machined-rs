@@ -60,6 +60,10 @@ pub trait Platform: Send + Sync {
     fn kernel_cmdline(&self) -> Result<String>;
     /// Whether something is currently mounted at `target`.
     fn is_mounted(&self, target: &str) -> Result<bool>;
+    /// Unmount the filesystem at `target`.
+    fn unmount(&self, target: &str) -> Result<()>;
+    /// Flush filesystem buffers to disk.
+    fn sync(&self);
     fn reboot(&self) -> Result<()>;
     fn poweroff(&self) -> Result<()>;
 

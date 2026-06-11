@@ -35,6 +35,26 @@ pub async fn serve(
         .await
 }
 
+/// Serve the management API over mutual TLS until `signal` resolves.
+pub async fn serve_with_shutdown(
+    addr: SocketAddr,
+    state: State,
+    version: impl Into<String>,
+    pki: &NodePki,
+    actions: tokio::sync::mpsc::Sender<NodeAction>,
+    signal: impl std::future::Future<Output = ()> + Send,
+) -> Result<(), tonic::transport::Error> {
+    let svc = pb::machine_service_server::MachineServiceServer::new(Machine::new(
+        state, version, actions,
+    ));
+    let tls = server_tls(pki);
+    Server::builder()
+        .tls_config(tls)?
+        .add_service(svc)
+        .serve_with_shutdown(addr, signal)
+        .await
+}
+
 /// Build the mutual-TLS config: the node's server identity plus the node CA as
 /// the required client-certificate root (so only CA-signed clients connect).
 fn server_tls(pki: &NodePki) -> tonic::transport::ServerTlsConfig {

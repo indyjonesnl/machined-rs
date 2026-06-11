@@ -215,3 +215,29 @@ async fn reboot_and_shutdown_enqueue_actions() {
     client.shutdown(Empty {}).await.unwrap();
     assert_eq!(rx.recv().await, Some(NodeAction::Shutdown));
 }
+
+#[tokio::test]
+async fn server_exits_on_shutdown_signal() {
+    use tokio_util::sync::CancellationToken;
+
+    let token = CancellationToken::new();
+    let t2 = token.clone();
+    let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
+        Machine::new(State::new(), "9.9.9", tokio::sync::mpsc::channel(1).0),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    let h = tokio::spawn(async move {
+        Server::builder()
+            .add_service(svc)
+            .serve_with_incoming_shutdown(incoming, async move { t2.cancelled().await })
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    token.cancel();
+    let res = tokio::time::timeout(Duration::from_secs(3), h)
+        .await
+        .expect("server must exit on signal")
+        .unwrap();
+    assert!(res.is_ok());
+}

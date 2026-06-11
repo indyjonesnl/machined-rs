@@ -121,12 +121,14 @@ async fn payload_waits_for_cri_then_starts() {
             command: vec!["sleep".into(), "30".into()],
             depends_on: vec![],
             restart: RestartPolicy::Never,
+            stop_grace_secs: None,
         },
         ServiceConfig {
             id: "payload".into(),
             command: vec!["true".into()],
             depends_on: vec!["containerd".into()],
             restart: RestartPolicy::Never,
+            stop_grace_secs: None,
         },
     ];
 
@@ -178,6 +180,7 @@ async fn stop_all_while_waiting_is_clean() {
         command: vec!["true".into()],
         depends_on: vec!["never-ready".into()],
         restart: RestartPolicy::Never,
+        stop_grace_secs: None,
     }];
     // The dep must be DETERMINISTICALLY never-ready. A fast-failing command
     // (e.g. `false`) briefly publishes Running+healthy before exiting, and the
@@ -193,6 +196,7 @@ async fn stop_all_while_waiting_is_clean() {
                 command: vec!["/nonexistent-machined-test-binary".into()],
                 depends_on: vec![],
                 restart: RestartPolicy::Never,
+                stop_grace_secs: None,
             },
         );
         s

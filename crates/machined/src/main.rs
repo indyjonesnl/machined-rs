@@ -27,7 +27,7 @@ use machined_sequencer::{boot_sequence, shutdown_sequence, SequencerCtx};
 use machined_supervisor::ServiceManager;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 const DEFAULT_CONFIG_PATH: &str = "/etc/machined/config.yaml";
 
@@ -241,6 +241,7 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     // Management API (M3a): node PKI + mTLS gRPC server, sharing the COSI store.
     let pki_dir = std::path::PathBuf::from("/system/state/pki");
+    let mut api_handle: Option<tokio::task::JoinHandle<()>> = None;
     match NodePki::load_or_generate(&pki_dir, "node", &["127.0.0.1".into(), "localhost".into()]) {
         Ok(pki) => {
             if let Err(e) = write_client_bundle(&pki_dir.join("machinectl"), &pki) {
@@ -249,19 +250,24 @@ async fn run_daemon() -> anyhow::Result<()> {
             let api_addr: SocketAddr = "127.0.0.1:50000".parse().unwrap();
             let api_state = state.clone();
             let api_action_tx = api_action_tx.clone();
-            tokio::spawn(async move {
-                if let Err(e) = machined_apiserver::serve(
+            let api_token = shutdown.clone();
+            api_handle = Some(tokio::spawn(async move {
+                if let Err(e) = machined_apiserver::serve_with_shutdown(
                     api_addr,
                     api_state,
                     env!("CARGO_PKG_VERSION"),
                     &pki,
                     api_action_tx,
+                    {
+                        let t = api_token;
+                        async move { t.cancelled().await }
+                    },
                 )
                 .await
                 {
                     error!("apiserver exited: {e}");
                 }
-            });
+            }));
             info!("management API listening on {api_addr}");
         }
         Err(e) => error!("PKI init failed; management API disabled: {e}"),
@@ -301,6 +307,16 @@ async fn run_daemon() -> anyhow::Result<()> {
     // Stop the runtime and join.
     shutdown.cancel();
     let _ = rt_handle.await;
+    if let Some(mut h) = api_handle {
+        if tokio::time::timeout(std::time::Duration::from_secs(5), &mut h)
+            .await
+            .is_err()
+        {
+            warn!("api server did not shut down in time; aborting");
+            h.abort();
+            let _ = h.await;
+        }
+    }
     info!("machined stopped");
 
     match final_action {

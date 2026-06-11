@@ -66,6 +66,19 @@ impl Platform for LinuxPlatform {
             .any(|line| line.split_whitespace().nth(4) == Some(target)))
     }
 
+    fn unmount(&self, target: &str) -> Result<()> {
+        nix::mount::umount2(target, nix::mount::MntFlags::empty()).map_err(|e| {
+            PlatformError::Mount {
+                target: target.to_string(),
+                message: format!("umount: {e}"),
+            }
+        })
+    }
+
+    fn sync(&self) {
+        nix::unistd::sync();
+    }
+
     fn reboot(&self) -> Result<()> {
         reboot(RebootMode::RB_AUTOBOOT)
             .map(|_| ())
@@ -88,5 +101,11 @@ mod tests {
         let p = LinuxPlatform::new();
         assert!(p.is_mounted("/").unwrap(), "/ must be mounted");
         assert!(!p.is_mounted("/no/such/mountpoint").unwrap());
+    }
+
+    #[test]
+    fn unmount_of_missing_target_errors() {
+        let p = LinuxPlatform::new();
+        assert!(p.unmount("/no/such/mnt").is_err());
     }
 }

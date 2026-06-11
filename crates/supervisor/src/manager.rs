@@ -2,17 +2,19 @@
 //! a background task) and stops them in reverse order on shutdown.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+use std::time::Duration;
 
 use machined_config::{RestartPolicy, ServiceConfig};
 use machined_runtime_core::State;
-use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use crate::process::ProcessRunner;
-use crate::readiness::{wait_for_deps, ReadinessCheck};
-use crate::restart::{Policy, RestartRunner};
-use crate::service::run_service;
+use crate::readiness::ReadinessCheck;
+use crate::restart::Policy;
+use crate::service::run_supervised;
 
 /// Translate the config restart policy into the supervisor policy.
 fn policy_of(p: RestartPolicy) -> Policy {
@@ -68,10 +70,19 @@ pub fn start_order(services: &[ServiceConfig]) -> Result<Vec<String>, String> {
     Ok(order)
 }
 
+/// One supervised service: its task, signal handle, stop intent, and grace.
+struct ServiceHandle {
+    id: String,
+    join: tokio::task::JoinHandle<()>,
+    pid: Arc<StdMutex<Option<u32>>>,
+    stop: Arc<AtomicBool>,
+    grace: Duration,
+}
+
 /// Supervises the configured services over a shared store.
 pub struct ServiceManager {
     state: State,
-    handles: Vec<(String, JoinHandle<()>)>,
+    handles: Vec<ServiceHandle>,
 }
 
 impl ServiceManager {
@@ -99,31 +110,70 @@ impl ServiceManager {
             let state = self.state.clone();
             let deps = cfg.depends_on.clone();
             let check = check.clone();
-            let sid = cfg.id.clone();
-            let runner = RestartRunner::new(
-                ProcessRunner::new(cfg.id.clone(), cfg.command.clone()),
-                policy_of(cfg.restart),
-            );
+            let stop = Arc::new(AtomicBool::new(false));
+            let stop_task = stop.clone();
+            let runner = ProcessRunner::new(cfg.id.clone(), cfg.command.clone());
+            let pid = runner.pid_slot();
+            let policy = policy_of(cfg.restart);
             info!(service = %cfg.id, "starting service");
             let handle = tokio::spawn(async move {
-                wait_for_deps(&state, check.as_ref(), &sid, &deps).await;
-                run_service(&state, runner).await;
+                run_supervised(&state, runner, policy, stop_task, check, &deps).await;
             });
-            self.handles.push((cfg.id.clone(), handle));
+            self.handles.push(ServiceHandle {
+                id: cfg.id.clone(),
+                join: handle,
+                pid,
+                stop,
+                grace: Duration::from_secs(cfg.stop_grace_secs.unwrap_or(10)),
+            });
         }
         Ok(())
     }
 
-    /// Stop all services in reverse start order, aborting their tasks. The
-    /// aborted task drops its `ProcessRunner`, whose `kill_on_drop` reaps the
-    /// child process (graceful SIGTERM + grace timeout lands in M5).
+    /// Stop all services in reverse start order: stop-intent → SIGTERM →
+    /// grace-bounded drain → abort (kill_on_drop SIGKILLs).
+    ///
+    /// Bounded race: if the supervised task is between attempts when the
+    /// intent lands (pid slot empty), the SIGTERM is skipped and one final
+    /// child may spawn; it either exits within the grace or is SIGKILLed at
+    /// expiry. The loop re-checks the intent, so no restart follows.
     pub async fn stop_all(&mut self) {
-        while let Some((id, handle)) = self.handles.pop() {
-            info!(service = %id, "stopping service");
-            handle.abort();
-            if let Err(e) = handle.await {
-                if !e.is_cancelled() {
-                    warn!(service = %id, "join error on stop: {e}");
+        while let Some(mut h) = self.handles.pop() {
+            h.stop.store(true, Ordering::SeqCst);
+            let pid = *h.pid.lock().unwrap();
+            if let Some(pid) = pid {
+                #[cfg(unix)]
+                {
+                    use nix::sys::signal::{kill, Signal};
+                    use nix::unistd::Pid;
+                    match kill(Pid::from_raw(pid as i32), Signal::SIGTERM) {
+                        Ok(()) => info!(service = %h.id, "sent SIGTERM"),
+                        Err(nix::errno::Errno::ESRCH) => {}
+                        Err(e) => warn!(service = %h.id, "SIGTERM failed: {e}"),
+                    }
+                }
+            }
+            match tokio::time::timeout(h.grace, &mut h.join).await {
+                Ok(join) => {
+                    if join.is_err() {
+                        warn!(service = %h.id, "supervision task panicked during stop");
+                    } else {
+                        info!(service = %h.id, "service drained");
+                    }
+                }
+                Err(_) => {
+                    warn!(service = %h.id, "grace expired; killing");
+                    h.join.abort();
+                    let _ = h.join.await;
+                    // The aborted task can't publish its own final status —
+                    // record the kill so stop progress stays observable.
+                    crate::service::publish_status(
+                        &self.state,
+                        &h.id,
+                        machined_resources::ServiceState::Failed,
+                        false,
+                        "killed after stop grace expired",
+                    );
                 }
             }
         }
@@ -141,6 +191,7 @@ mod tests {
             command: vec!["true".into()],
             depends_on: deps.iter().map(|s| s.to_string()).collect(),
             restart: RestartPolicy::Never,
+            stop_grace_secs: None,
         }
     }
 
@@ -176,6 +227,7 @@ mod tests {
                 command: vec!["true".into()],
                 depends_on: vec![],
                 restart: RestartPolicy::Never,
+                stop_grace_secs: None,
             }],
             Arc::new(crate::readiness::DefaultReadiness),
         )
@@ -197,5 +249,140 @@ mod tests {
         }
         assert!(seen, "ServiceStatus was never published");
         mgr.stop_all().await;
+    }
+
+    use machined_resources::{Key, Resource, ResourceType, ServiceState};
+    use std::time::{Duration, Instant};
+
+    fn svc_full(id: &str, command: &[&str], grace: u64) -> ServiceConfig {
+        ServiceConfig {
+            id: id.into(),
+            command: command.iter().map(|s| s.to_string()).collect(),
+            depends_on: vec![],
+            restart: RestartPolicy::Never,
+            stop_grace_secs: Some(grace),
+        }
+    }
+
+    async fn wait_running(state: &State, id: &str) {
+        let k = Key::new("runtime", ResourceType::ServiceStatus, id);
+        for _ in 0..150 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if let Ok(o) = state.get(&k) {
+                if matches!(o.spec, Resource::ServiceStatus(ref s) if s.state == ServiceState::Running)
+                {
+                    return;
+                }
+            }
+        }
+        panic!("{id} never reached Running");
+    }
+
+    #[tokio::test]
+    async fn graceful_stop_drains_on_sigterm() {
+        let state = State::new();
+        let mut mgr = ServiceManager::new(state.clone());
+        mgr.start_all(
+            &[svc_full(
+                "drainer",
+                &["sh", "-c", "trap 'kill $!; exit 0' TERM; sleep 30 & wait"],
+                5,
+            )],
+            Arc::new(crate::readiness::DefaultReadiness),
+        )
+        .unwrap();
+        wait_running(&state, "drainer").await;
+
+        let t0 = Instant::now();
+        mgr.stop_all().await;
+        let took = t0.elapsed();
+        assert!(
+            took < Duration::from_secs(4),
+            "drained, not grace-expired: {took:?}"
+        );
+        let k = Key::new("runtime", ResourceType::ServiceStatus, "drainer");
+        match state.get(&k).unwrap().spec {
+            Resource::ServiceStatus(s) => {
+                assert_eq!(
+                    s.state,
+                    ServiceState::Finished,
+                    "TERM-trapped exit 0 → Finished"
+                )
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn grace_expiry_kills() {
+        let state = State::new();
+        let mut mgr = ServiceManager::new(state.clone());
+        mgr.start_all(
+            &[svc_full(
+                "stubborn",
+                // `exec` keeps this a single process (ignored TERM survives
+                // exec); the eventual kill_on_drop SIGKILL leaves no orphan.
+                &["sh", "-c", "trap '' TERM; exec sleep 30"],
+                1,
+            )],
+            Arc::new(crate::readiness::DefaultReadiness),
+        )
+        .unwrap();
+        wait_running(&state, "stubborn").await;
+
+        let t0 = Instant::now();
+        mgr.stop_all().await;
+        let took = t0.elapsed();
+        assert!(
+            took >= Duration::from_millis(900) && took < Duration::from_secs(5),
+            "killed at ~grace: {took:?}"
+        );
+        // The kill is observable: status records the forced stop.
+        let k = Key::new("runtime", ResourceType::ServiceStatus, "stubborn");
+        match state.get(&k).unwrap().spec {
+            Resource::ServiceStatus(s) => {
+                assert_eq!(s.state, ServiceState::Failed);
+                assert!(s.last_message.contains("killed"));
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_all_reverse_order() {
+        // dep ← dependent; stop must drain the dependent first. Both record
+        // their TERM time by exiting promptly; reverse order is observable via
+        // sequential stop (dependent drained before dep gets TERM).
+        let state = State::new();
+        let mut mgr = ServiceManager::new(state.clone());
+        let dep = svc_full(
+            "dep",
+            &["sh", "-c", "trap 'kill $!; exit 0' TERM; sleep 30 & wait"],
+            5,
+        );
+        let mut dependent = svc_full(
+            "dependent",
+            &["sh", "-c", "trap 'kill $!; exit 0' TERM; sleep 30 & wait"],
+            5,
+        );
+        dependent.depends_on = vec!["dep".into()];
+        mgr.start_all(
+            &[dep, dependent],
+            Arc::new(crate::readiness::DefaultReadiness),
+        )
+        .unwrap();
+        wait_running(&state, "dep").await;
+        wait_running(&state, "dependent").await;
+
+        mgr.stop_all().await;
+        // Both Finished; handles popped in reverse (dependent first) — the
+        // sequential drain proves ordering structurally (handles is a stack).
+        for id in ["dep", "dependent"] {
+            let k = Key::new("runtime", ResourceType::ServiceStatus, id);
+            match state.get(&k).unwrap().spec {
+                Resource::ServiceStatus(s) => assert_eq!(s.state, ServiceState::Finished),
+                _ => panic!(),
+            }
+        }
     }
 }
