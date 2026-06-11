@@ -40,3 +40,18 @@ pub trait Runner: Send {
     /// Request a graceful stop of a running instance.
     async fn stop(&mut self) -> Result<()>;
 }
+
+/// Allow driving a runner through a mutable borrow (e.g. per-attempt runs in a
+/// supervision loop that retains ownership across attempts).
+#[async_trait]
+impl<R: Runner> Runner for &mut R {
+    fn id(&self) -> &str {
+        (**self).id()
+    }
+    async fn run(&mut self) -> Result<RunOutcome> {
+        (**self).run().await
+    }
+    async fn stop(&mut self) -> Result<()> {
+        (**self).stop().await
+    }
+}

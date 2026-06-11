@@ -16,6 +16,7 @@ pub fn containerd_service(rt: &RuntimeSection) -> ServiceConfig {
         ],
         depends_on: Vec::new(),
         restart: RestartPolicy::Always,
+        stop_grace_secs: None,
     }
 }
 
@@ -74,6 +75,7 @@ mod tests {
             command: vec!["/bin/payload".into()],
             depends_on: vec!["containerd".into()],
             restart: Default::default(),
+            stop_grace_secs: None,
         }];
         let on = effective_services(&RuntimeSection::default(), &user);
         assert_eq!(on.len(), 2);
@@ -97,6 +99,7 @@ mod tests {
             command: vec!["/bin/x".into()],
             depends_on: vec![],
             restart: Default::default(),
+            stop_grace_secs: None,
         }];
         assert!(validate_services(&bad).is_err());
         assert!(validate_services(&[]).is_ok());

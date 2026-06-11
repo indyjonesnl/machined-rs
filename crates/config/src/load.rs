@@ -132,6 +132,18 @@ machine:
     }
 
     #[test]
+    fn stop_grace_parses_and_defaults() {
+        let cfg = load_from_str(
+            "machine:\n  services:\n    - id: a\n      command: [x]\n      stop_grace_secs: 3\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.machine.services[0].stop_grace_secs, Some(3));
+        let cfg2 =
+            load_from_str("machine:\n  services:\n    - id: a\n      command: [x]\n").unwrap();
+        assert_eq!(cfg2.machine.services[0].stop_grace_secs, None);
+    }
+
+    #[test]
     fn empty_config_is_valid() {
         let cfg = load_from_str("{}").unwrap();
         assert!(cfg.machine.hostname.is_none());

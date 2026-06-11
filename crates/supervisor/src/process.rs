@@ -1,6 +1,7 @@
 //! `Runner` backend that forks/execs a host process via `tokio::process`.
 
 use async_trait::async_trait;
+use std::sync::{Arc, Mutex};
 use tokio::process::{Child, Command};
 use tracing::warn;
 
@@ -10,6 +11,9 @@ pub struct ProcessRunner {
     id: String,
     command: Vec<String>,
     child: Option<Child>,
+    /// Shared view of the live child PID (None when not running). The manager
+    /// reads it to deliver SIGTERM during graceful stop.
+    pid_slot: Arc<Mutex<Option<u32>>>,
 }
 
 impl ProcessRunner {
@@ -19,7 +23,13 @@ impl ProcessRunner {
             id: id.into(),
             command,
             child: None,
+            pid_slot: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Handle the manager uses to signal the live child.
+    pub fn pid_slot(&self) -> Arc<Mutex<Option<u32>>> {
+        self.pid_slot.clone()
     }
 }
 
@@ -47,6 +57,7 @@ impl Runner for ProcessRunner {
                 source,
             })?;
         self.child = Some(child);
+        *self.pid_slot.lock().unwrap() = self.child.as_ref().unwrap().id();
 
         let status = self
             .child
@@ -56,6 +67,7 @@ impl Runner for ProcessRunner {
             .await
             .map_err(|e| RunnerError::Other(format!("wait {}: {e}", self.id)))?;
         self.child = None;
+        *self.pid_slot.lock().unwrap() = None;
 
         Ok(if status.success() {
             RunOutcome::Success

@@ -35,6 +35,7 @@ async fn boots_supervises_and_shuts_down() {
                 command: vec!["sleep".into(), "5".into()],
                 depends_on: vec![],
                 restart: RestartPolicy::Never,
+                stop_grace_secs: None,
             }],
             network: Default::default(),
             install: None,

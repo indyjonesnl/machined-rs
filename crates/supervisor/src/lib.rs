@@ -8,7 +8,7 @@ pub use process::ProcessRunner;
 pub use runner::{RunOutcome, Runner, RunnerError};
 
 pub mod restart;
-pub use restart::{Policy, RestartRunner};
+pub use restart::{should_restart, Policy};
 
 pub mod manager;
 pub mod readiness;
@@ -16,4 +16,4 @@ pub mod service;
 
 pub use manager::{start_order, ServiceManager};
 pub use readiness::{DefaultReadiness, ReadinessCheck};
-pub use service::{publish_status, run_service};
+pub use service::{publish_status, run_service, run_supervised};
