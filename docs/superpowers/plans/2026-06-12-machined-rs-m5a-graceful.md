@@ -553,6 +553,14 @@ Append to the `tests` module in `manager.rs`:
 > `sleep 30 & wait` (not bare `sleep 30`): `sh` only delivers traps between commands; `wait` is
 > interruptible by signals, so the trap fires immediately on TERM.
 
+> **Implementation deviations (applied, verified):** (1) a blanket `impl Runner for &mut R` in
+> runner.rs — `run_service` takes the runner by value, so per-attempt calls need the borrow impl.
+> (2) The dep gate inside `run_supervised` must be STOP-AWARE: a service parked in `Waiting` never
+> returns from `wait_for_deps`, so a bare await blocks `stop_all` for the full grace; the gate races
+> `wait_for_deps` against a 50ms stop-flag poll in `tokio::select!`. (3) Test shells: drainer
+> `trap 'kill $!; exit 0' TERM; sleep 30 & wait`; stubborn `trap '' TERM; exec sleep 30` — both
+> orphan-free. (4) supervisor's nix dep under `[target.'cfg(unix)'.dependencies]`.
+
 - [ ] **Step 7: gates + commit**
 
 Run: `cargo test -p machined-supervisor` → all (policy table + run_supervised ×3 + graceful ×3 + existing readiness/manager/service tests). No hangs.
