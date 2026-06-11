@@ -866,6 +866,7 @@ dependencies = [
  "machined-block",
  "machined-common",
  "machined-config",
+ "machined-cri",
  "machined-netlink",
  "machined-platform",
  "machined-resources",
