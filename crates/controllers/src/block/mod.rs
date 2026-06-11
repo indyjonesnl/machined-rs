@@ -1,9 +1,11 @@
 //! Block controllers. M2b-1: read-only discovery.
 
 pub mod discovery;
+pub mod mount;
 pub mod provision;
 
 pub use discovery::DiskDiscoveryController;
+pub use mount::{mountpoint, VolumeMountController};
 pub use provision::{plan_provisioning, ProvisionDecision, VolumeProvisionerController};
 
 use std::fmt::Display;
