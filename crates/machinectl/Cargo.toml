@@ -1,0 +1,22 @@
+[package]
+name = "machinectl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "machinectl"
+path = "src/main.rs"
+
+[dependencies]
+machined-apiserver.workspace = true
+clap.workspace = true
+tonic.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+machined-pki.workspace = true
+machined-runtime-core.workspace = true
+machined-resources.workspace = true
+tokio-stream.workspace = true

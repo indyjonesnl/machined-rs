@@ -9,6 +9,8 @@ name = "machined"
 path = "src/main.rs"
 
 [dependencies]
+machined-apiserver.workspace = true
+machined-pki.workspace = true
 machined-block.workspace = true
 machined-common.workspace = true
 machined-config.workspace = true
