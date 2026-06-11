@@ -158,5 +158,29 @@ async fn mtls_requires_a_valid_client_cert() {
         }
     );
 
+    // Rogue client: a cert signed by a DIFFERENT (attacker) CA is rejected — it
+    // does not chain to the node CA in client_ca_root. (The realistic attack.)
+    let rogue_dir = std::env::temp_dir().join(format!("mnd-api-rogue-{}", std::process::id()));
+    let rogue = NodePki::load_or_generate(&rogue_dir, "rogue", &["127.0.0.1".into()]).unwrap();
+    let rogue_id = rogue.issue_client("attacker").unwrap();
+    let tls_rogue = ClientTlsConfig::new()
+        .ca_certificate(Certificate::from_pem(&ca)) // still trust the real server
+        .identity(Identity::from_pem(&rogue_id.cert_pem, &rogue_id.key_pem))
+        .domain_name("127.0.0.1");
+    let rogue_conn = Endpoint::from_shared(format!("https://{addr}"))
+        .unwrap()
+        .tls_config(tls_rogue)
+        .unwrap()
+        .connect()
+        .await;
+    assert!(
+        rogue_conn.is_err() || {
+            let mut c = MachineServiceClient::new(rogue_conn.unwrap());
+            c.version(Empty {}).await.is_err()
+        },
+        "a client cert from a rogue CA must be rejected"
+    );
+    std::fs::remove_dir_all(&rogue_dir).ok();
+
     std::fs::remove_dir_all(&dir).ok();
 }
