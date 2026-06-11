@@ -40,6 +40,7 @@ async fn config_drives_network_through_controllers() {
                 nameservers: vec![],
                 search: vec![],
             },
+            install: None,
         },
     };
 

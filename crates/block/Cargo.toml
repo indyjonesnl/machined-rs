@@ -12,6 +12,8 @@ tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gpt.workspace = true
+nix = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -112,6 +112,7 @@ mod tests {
                     restart: RestartPolicy::Never,
                 }],
                 network: Default::default(),
+                install: None,
             },
         };
         let ctx = SequencerCtx {

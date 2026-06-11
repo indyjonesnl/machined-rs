@@ -6,7 +6,7 @@ pub mod metadata;
 pub mod network;
 pub mod resource;
 
-pub use block::{DiscoveredVolume, DiskStatus};
+pub use block::{DiscoveredVolume, DiskStatus, VolumePhase, VolumeStatus};
 pub use metadata::{Key, Metadata, Phase, ResourceType};
 pub use network::{
     AddrCidr, AddrCidrParseError, AddressSpec, AddressStatus, HostnameSpec, LinkSpec, LinkStatus,

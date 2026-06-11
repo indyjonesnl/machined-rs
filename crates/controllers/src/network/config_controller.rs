@@ -198,6 +198,7 @@ mod tests {
                     nameservers: vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))],
                     search: vec!["example.com".into()],
                 },
+                install: None,
             },
         })
     }

@@ -45,7 +45,12 @@ impl Controller for DiskDiscoveryController {
     }
 
     async fn reconcile(&mut self, ctx: &ReconcileCtx) -> machined_runtime_core::Result<()> {
+        // Fetch both, then publish DiscoveredVolume BEFORE DiskStatus with no
+        // await between the two reconcile_owned calls — making DiskStatus the
+        // "scan complete" barrier the provisioner gates on (DiskStatus present ⇒
+        // this scan's DiscoveredVolumes are already in the store).
         let disks = self.backend.list_disks().await.map_err(ctl)?;
+        let volumes = self.backend.list_volumes().await.map_err(ctl)?;
         let disk_objs = disks
             .into_iter()
             .map(|d| {
@@ -64,9 +69,6 @@ impl Controller for DiskDiscoveryController {
                 )
             })
             .collect();
-        reconcile_owned(&ctx.state, OWNER, NS, ResourceType::DiskStatus, disk_objs)?;
-
-        let volumes = self.backend.list_volumes().await.map_err(ctl)?;
         let vol_objs = volumes
             .into_iter()
             .map(|v| {
@@ -88,6 +90,7 @@ impl Controller for DiskDiscoveryController {
                 )
             })
             .collect();
+        // Content first, then the DiskStatus barrier (no await between).
         reconcile_owned(
             &ctx.state,
             OWNER,
@@ -95,6 +98,7 @@ impl Controller for DiskDiscoveryController {
             ResourceType::DiscoveredVolume,
             vol_objs,
         )?;
+        reconcile_owned(&ctx.state, OWNER, NS, ResourceType::DiskStatus, disk_objs)?;
         Ok(())
     }
 }

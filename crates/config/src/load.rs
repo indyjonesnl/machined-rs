@@ -78,6 +78,27 @@ machine:
       - example.com
 "#;
 
+    const INSTALL_SAMPLE: &str = r#"
+machine:
+  install:
+    disk: /dev/sda
+    wipe: true
+"#;
+
+    #[test]
+    fn parses_install_section() {
+        let cfg = load_from_str(INSTALL_SAMPLE).unwrap();
+        let install = cfg.machine.install.as_ref().unwrap();
+        assert_eq!(install.disk, "/dev/sda");
+        assert!(install.wipe);
+    }
+
+    #[test]
+    fn install_wipe_defaults_false() {
+        let cfg = load_from_str("machine:\n  install:\n    disk: /dev/vda\n").unwrap();
+        assert!(!cfg.machine.install.as_ref().unwrap().wipe);
+    }
+
     #[test]
     fn parses_network_section() {
         let cfg = load_from_str(NET_SAMPLE).unwrap();

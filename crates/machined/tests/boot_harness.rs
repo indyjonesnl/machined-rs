@@ -35,6 +35,7 @@ async fn boots_supervises_and_shuts_down() {
                 restart: RestartPolicy::Never,
             }],
             network: Default::default(),
+            install: None,
         },
     };
 
