@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use machined_common::init_logging;
 use machined_config::{load::load_from_path, Provider};
-use machined_controllers::block::DiskDiscoveryController;
+use machined_controllers::block::{DiskDiscoveryController, VolumeProvisionerController};
 use machined_controllers::network::{
     AddressController, HostnameController, LinkController, NetworkConfigController,
     ResolverController, RouteController,
@@ -51,7 +51,18 @@ fn build_network_backend() -> Arc<dyn machined_netlink::NetworkBackend> {
     }
 }
 
-fn build_block_backend() -> Arc<dyn machined_block::BlockBackend> {
+fn build_block_provisioner() -> Arc<dyn machined_block::BlockProvisioner> {
+    #[cfg(target_os = "linux")]
+    {
+        Arc::new(machined_block::SysfsBlock::new())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Arc::new(machined_block::FakeBlockBackend::new())
+    }
+}
+
+fn build_block_backend_for_discovery() -> Arc<dyn machined_block::BlockBackend> {
     #[cfg(target_os = "linux")]
     {
         Arc::new(machined_block::SysfsBlock::new())
@@ -122,9 +133,16 @@ async fn run_daemon() -> anyhow::Result<()> {
     runtime.register(Box::new(HostnameController::new(platform.clone())));
     runtime.register(Box::new(ResolverController::at_etc()));
 
-    runtime.register(Box::new(
-        DiskDiscoveryController::new(build_block_backend()),
-    ));
+    let block = build_block_provisioner();
+    // BlockProvisioner is a supertrait of BlockBackend; a fresh trait object for
+    // discovery is built from the same concrete type.
+    runtime.register(Box::new(DiskDiscoveryController::new(
+        build_block_backend_for_discovery(),
+    )));
+    runtime.register(Box::new(VolumeProvisionerController::new(
+        block,
+        provider.clone(),
+    )));
 
     let rt_token = shutdown.clone();
     let rt_handle = tokio::spawn(async move {
