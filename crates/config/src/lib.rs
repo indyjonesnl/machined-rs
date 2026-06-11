@@ -2,11 +2,16 @@
 
 pub mod load;
 pub mod provider;
+pub mod runtime_svc;
 pub mod types;
 
 pub use load::{load_from_str, ConfigError};
 pub use provider::Provider;
+pub use runtime_svc::{
+    containerd_config_toml, containerd_service, effective_services, validate_services,
+    RUNTIME_SERVICE_ID,
+};
 pub use types::{
     InstallSection, InterfaceConfig, MachineConfig, MachineSection, NetworkSection, RestartPolicy,
-    RouteConfig, ServiceConfig, Sysctl, TimeSection,
+    RouteConfig, RuntimeSection, ServiceConfig, Sysctl, TimeSection,
 };

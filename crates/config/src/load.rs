@@ -16,11 +16,15 @@ pub enum ConfigError {
     },
     #[error("parsing config: {0}")]
     Parse(#[from] serde_yaml::Error),
+    #[error("invalid config: {0}")]
+    Invalid(String),
 }
 
 /// Parse a machine config from a YAML string.
 pub fn load_from_str(yaml: &str) -> Result<MachineConfig, ConfigError> {
-    Ok(serde_yaml::from_str(yaml)?)
+    let cfg: MachineConfig = serde_yaml::from_str(yaml)?;
+    crate::runtime_svc::validate_services(&cfg.machine.services).map_err(ConfigError::Invalid)?;
+    Ok(cfg)
 }
 
 /// Read and parse a machine config from disk.
@@ -148,6 +152,23 @@ machine:
         let cfg = load_from_str("machine: {}").unwrap();
         assert!(cfg.machine.time.servers.is_empty());
         assert!(!cfg.machine.time.disabled);
+    }
+
+    #[test]
+    fn runtime_defaults() {
+        let cfg = load_from_str("machine: {}").unwrap();
+        assert!(!cfg.machine.runtime.disabled);
+        assert_eq!(cfg.machine.runtime.binary, "/usr/bin/containerd");
+        assert_eq!(
+            cfg.machine.runtime.socket,
+            "/run/containerd/containerd.sock"
+        );
+    }
+
+    #[test]
+    fn reserved_service_id_rejected() {
+        let yaml = "machine:\n  services:\n    - id: containerd\n      command: [/bin/x]\n";
+        assert!(load_from_str(yaml).is_err());
     }
 
     #[test]

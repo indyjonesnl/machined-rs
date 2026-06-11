@@ -25,6 +25,7 @@ async fn syncs_time_and_publishes_status() {
                 servers: vec!["a".into()],
                 disabled: false,
             },
+            runtime: Default::default(),
         },
     };
 

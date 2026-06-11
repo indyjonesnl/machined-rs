@@ -66,7 +66,20 @@ impl Task for StartServices {
         "start-services"
     }
     async fn run(&self, ctx: &SequencerCtx) -> crate::task::Result<()> {
-        let services = ctx.provider.services().to_vec();
+        let rt = ctx.provider.runtime();
+        if !rt.disabled {
+            // Best-effort: write the minimal containerd config if absent.
+            let path = std::path::Path::new(&rt.config_path);
+            if !path.exists() {
+                if let Some(dir) = path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                if let Err(e) = std::fs::write(path, machined_config::containerd_config_toml(rt)) {
+                    tracing::warn!("writing containerd config: {e}");
+                }
+            }
+        }
+        let services = machined_config::effective_services(rt, ctx.provider.services());
         let mut mgr = ctx.services.lock().await;
         mgr.start_all(&services).map_err(|message| TaskError {
             task: self.name().into(),
@@ -90,7 +103,9 @@ pub fn boot_sequence() -> PhaseList {
 mod tests {
     use super::*;
     use crate::task::SequencerCtx;
-    use machined_config::{MachineConfig, MachineSection, Provider, RestartPolicy, ServiceConfig};
+    use machined_config::{
+        MachineConfig, MachineSection, Provider, RestartPolicy, RuntimeSection, ServiceConfig,
+    };
     use machined_platform::{essential_mounts, FakePlatform};
     use machined_runtime_core::State;
     use machined_supervisor::ServiceManager;
@@ -114,6 +129,11 @@ mod tests {
                 network: Default::default(),
                 install: None,
                 time: Default::default(),
+                // Hermetic test: never spawn the host containerd.
+                runtime: RuntimeSection {
+                    disabled: true,
+                    ..Default::default()
+                },
             },
         };
         let ctx = SequencerCtx {

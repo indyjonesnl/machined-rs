@@ -37,6 +37,7 @@ async fn provisions_install_disk_after_discovery_barrier() {
                 wipe: true,
             }),
             time: Default::default(),
+            runtime: Default::default(),
         },
     };
 

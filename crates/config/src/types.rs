@@ -32,6 +32,9 @@ pub struct MachineSection {
     /// Time-sync configuration.
     #[serde(default)]
     pub time: TimeSection,
+    /// Container runtime (containerd) management.
+    #[serde(default)]
+    pub runtime: RuntimeSection,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -131,4 +134,28 @@ pub struct TimeSection {
     /// Disable time sync entirely.
     #[serde(default)]
     pub disabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct RuntimeSection {
+    /// Disable runtime management entirely.
+    pub disabled: bool,
+    /// containerd binary path.
+    pub binary: String,
+    /// CRI unix socket path.
+    pub socket: String,
+    /// Generated containerd config path.
+    pub config_path: String,
+}
+
+impl Default for RuntimeSection {
+    fn default() -> Self {
+        Self {
+            disabled: false,
+            binary: "/usr/bin/containerd".into(),
+            socket: "/run/containerd/containerd.sock".into(),
+            config_path: "/etc/containerd/config.toml".into(),
+        }
+    }
 }

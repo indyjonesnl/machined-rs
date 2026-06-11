@@ -5,7 +5,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use machined_config::{MachineConfig, MachineSection, Provider, RestartPolicy, ServiceConfig};
+use machined_config::{
+    MachineConfig, MachineSection, Provider, RestartPolicy, RuntimeSection, ServiceConfig,
+};
 use machined_platform::{essential_mounts, FakePlatform};
 use machined_resources::{Key, Resource, ResourceType, ServiceState};
 use machined_runtime_core::Runtime;
@@ -37,6 +39,11 @@ async fn boots_supervises_and_shuts_down() {
             network: Default::default(),
             install: None,
             time: Default::default(),
+            // Hermetic tests: never spawn the host containerd.
+            runtime: RuntimeSection {
+                disabled: true,
+                ..Default::default()
+            },
         },
     };
 

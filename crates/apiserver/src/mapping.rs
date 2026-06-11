@@ -20,6 +20,7 @@ pub fn parse_resource_type(s: &str) -> Option<ResourceType> {
         "VolumeStatus" => ResourceType::VolumeStatus,
         "MountStatus" => ResourceType::MountStatus,
         "TimeStatus" => ResourceType::TimeStatus,
+        "RuntimeStatus" => ResourceType::RuntimeStatus,
         _ => return None,
     })
 }
@@ -102,6 +103,11 @@ pub fn resource_to_fields(spec: &Resource) -> Vec<(String, String)> {
             kv("server", &t.server),
             kv("offset_ns", t.offset_ns),
             kv("sync_count", t.sync_count),
+        ],
+        Resource::RuntimeStatus(r) => vec![
+            kv("ready", r.ready),
+            kv("name", &r.name),
+            kv("version", &r.version),
         ],
     }
 }

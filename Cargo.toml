@@ -16,6 +16,7 @@ members = [
     "crates/pki",
     "crates/apiserver",
     "crates/machinectl",
+    "crates/cri",
 ]
 
 [workspace.package]
@@ -47,6 +48,10 @@ tonic-build = "0.12"
 protoc-bin-vendored = "3"
 tokio-stream = "0.1"
 clap = { version = "4", features = ["derive"] }
+# SPIKE adaptation: tower default features don't include `util` (service_fn);
+# hyper-util has no default features and TokioIo is behind `tokio`.
+tower = { version = "0.4", features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 
 # internal crates
 machined-common = { path = "crates/common" }
@@ -64,3 +69,4 @@ machined-block = { path = "crates/block" }
 machined-time = { path = "crates/time" }
 machined-pki = { path = "crates/pki" }
 machined-apiserver = { path = "crates/apiserver" }
+machined-cri = { path = "crates/cri" }
