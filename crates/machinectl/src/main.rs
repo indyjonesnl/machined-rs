@@ -33,6 +33,10 @@ enum Command {
         #[arg(long, default_value = "runtime")]
         namespace: String,
     },
+    /// Reboot the node.
+    Reboot,
+    /// Power the node off.
+    Shutdown,
 }
 
 fn read(path: &Path) -> anyhow::Result<String> {
@@ -85,6 +89,14 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}\t{}", e.id, fields);
             }
         }
+        Command::Reboot => {
+            client.reboot(Empty {}).await?;
+            println!("reboot requested");
+        }
+        Command::Shutdown => {
+            client.shutdown(Empty {}).await?;
+            println!("shutdown requested");
+        }
     }
     Ok(())
 }
@@ -124,5 +136,13 @@ mod tests {
         let cli = Cli::try_parse_from(["machinectl", "version"]).unwrap();
         assert!(matches!(cli.command, Command::Version));
         assert_eq!(cli.endpoint, "https://127.0.0.1:50000");
+    }
+
+    #[test]
+    fn parses_reboot_and_shutdown() {
+        let r = Cli::try_parse_from(["machinectl", "reboot"]).unwrap();
+        assert!(matches!(r.command, Command::Reboot));
+        let s = Cli::try_parse_from(["machinectl", "shutdown"]).unwrap();
+        assert!(matches!(s.command, Command::Shutdown));
     }
 }

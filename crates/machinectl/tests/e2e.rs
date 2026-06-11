@@ -42,12 +42,13 @@ async fn machinectl_queries_a_real_server() {
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     let (scert, skey) = pki.server_identity();
     let ca_pem = pki.ca_pem();
+    let (action_tx, mut action_rx) = tokio::sync::mpsc::channel(1);
     tokio::spawn(async move {
         let tls = ServerTlsConfig::new()
             .identity(Identity::from_pem(scert, skey))
             .client_ca_root(Certificate::from_pem(ca_pem));
         let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-            machined_apiserver::Machine::new(state, "1.2.3", tokio::sync::mpsc::channel(1).0),
+            machined_apiserver::Machine::new(state, "1.2.3", action_tx),
         );
         Server::builder()
             .tls_config(tls)
@@ -96,6 +97,24 @@ async fn machinectl_queries_a_real_server() {
     assert!(out2.status.success(), "get failed: {:?}", out2);
     let stdout2 = String::from_utf8_lossy(&out2.stdout);
     assert!(stdout2.contains("etcd"), "get stdout: {stdout2}");
+
+    // `reboot` reaches the handler → the action is enqueued.
+    let out3 = tokio::process::Command::new(bin)
+        .args([
+            "--bundle",
+            bundle.to_str().unwrap(),
+            "--endpoint",
+            &endpoint,
+            "reboot",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(out3.status.success(), "reboot failed: {:?}", out3);
+    assert_eq!(
+        action_rx.recv().await,
+        Some(machined_apiserver::NodeAction::Reboot)
+    );
 
     std::fs::remove_dir_all(&root).ok();
 }
