@@ -66,18 +66,29 @@ ServiceHandle { id, join: JoinHandle, pid: Arc<Mutex<Option<u32>>>, stop: Arc<At
   4. Continue to the next (older) service.
 - A service still `Waiting` (no child) just gets aborted as today — trivially safe.
 
-### 3.3 Restart re-wait (the unified gate)
+### 3.3 Restart re-wait (the unified gate) — `run_supervised`
+
+A pre-run hook inside `RestartRunner` would be status-dishonest: `run_service` publishes
+`Preparing→Running` once up front, so a restart parked on the gate would still show `Running`.
+Instead the restart loop moves up a layer into a new `run_supervised` (service.rs):
 
 ```text
-RestartRunner::new(inner, policy)
-    .with_stop(stop: Arc<AtomicBool>)
-    .with_pre_run(hook: Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>)
+run_supervised(state, inner: ProcessRunner-like, policy, stop: Arc<AtomicBool>,
+               check: Arc<dyn ReadinessCheck>, deps: &[String])
+loop:
+    if stop → publish Finished "stopped"; return
+    wait_for_deps(state, check, id, deps).await      // publishes Waiting if gated
+    if stop → return                                  // stop won while gated
+    outcome = run_service(state, &mut inner).await    // per-ATTEMPT Preparing→Running→…
+    if !should_restart(policy, outcome) → return
+    sleep(backoff)
 ```
 
-The manager's spawn closure becomes: build the hook = `wait_for_deps(state, check, id, deps)`
-(captured clones); `RestartRunner` awaits it before the first run AND before every restart. The
-M4b-era call of `wait_for_deps` before `run_service` moves inside the runner (one gate, no
-duplication). `wait_for_deps` keeps its fast path, so a ready dep adds no latency to restarts.
+Every attempt (first start and each restart) gets the same gate AND truthful per-attempt status
+(`Waiting → Preparing → Running → …`, cycling on restarts). `RestartRunner` is retired — its policy
+logic survives as a pure `should_restart(policy, outcome)` (its scripted tests adapt to
+`run_supervised`); the manager spawns `run_supervised` directly. `wait_for_deps` keeps its fast
+path, so ready deps add no restart latency.
 
 ### 3.4 Platform unmount + shutdown disk task
 
