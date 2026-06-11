@@ -123,7 +123,11 @@ impl BlockBackend for SysfsBlock {
                 source,
             })?;
             let name = entry.file_name().to_string_lossy().to_string();
-            // Skip pure memory-backed virtual devices.
+            // Skip only pure memory-backed virtual devices. loop/dm/md are kept
+            // deliberately: loop is needed by the loopback integration test, and
+            // a device with no GPT is harmlessly skipped during list_volumes
+            // anyway (read-only discovery). Production install disks are never
+            // loop devices.
             if name.starts_with("ram") || name.starts_with("zram") {
                 continue;
             }
@@ -134,7 +138,7 @@ impl BlockBackend for SysfsBlock {
             out.push(DiskInfo {
                 name: name.clone(),
                 path: self.dev_root.join(&name).to_string_lossy().to_string(),
-                size_bytes: size_sectors * 512,
+                size_bytes: size_sectors.saturating_mul(512),
                 model: read_trim(&dir.join("device/model")).unwrap_or_default(),
                 serial: read_trim(&dir.join("device/serial")).unwrap_or_default(),
                 rotational: read_trim(&dir.join("queue/rotational")).as_deref() == Some("1"),
