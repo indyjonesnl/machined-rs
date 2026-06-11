@@ -12,7 +12,7 @@ use machined_platform::{essential_mounts, FakePlatform};
 use machined_resources::{Key, Resource, ResourceType, ServiceState};
 use machined_runtime_core::Runtime;
 use machined_sequencer::{boot_sequence, shutdown_sequence, SequencerCtx};
-use machined_supervisor::ServiceManager;
+use machined_supervisor::{DefaultReadiness, ServiceManager};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
@@ -53,6 +53,7 @@ async fn boots_supervises_and_shuts_down() {
         platform: platform.clone(),
         provider: Provider::new(cfg),
         services: services.clone(),
+        readiness: Arc::new(DefaultReadiness),
     };
 
     // Boot.

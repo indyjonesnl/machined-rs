@@ -32,6 +32,8 @@ pub struct ServiceStatusSpec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServiceState {
     Preparing,
+    /// Waiting for dependencies to become ready.
+    Waiting,
     Running,
     Finished,
     Skipped,

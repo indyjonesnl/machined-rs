@@ -246,6 +246,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         platform: platform.clone(),
         provider,
         services: services.clone(),
+        readiness: Arc::new(machined_supervisor::DefaultReadiness),
     };
 
     // Boot.
