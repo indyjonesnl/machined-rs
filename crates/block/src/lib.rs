@@ -4,13 +4,15 @@
 
 pub mod fake;
 pub mod fsprobe;
-// #[cfg(target_os = "linux")] pub mod sysfs;  // Task 4
+#[cfg(target_os = "linux")]
+pub mod sysfs;
 
 use async_trait::async_trait;
 
 pub use fake::FakeBlockBackend;
 pub use fsprobe::{probe_fs, FsProbe};
-// #[cfg(target_os = "linux")] pub use sysfs::SysfsBlock;  // Task 4
+#[cfg(target_os = "linux")]
+pub use sysfs::SysfsBlock;
 
 #[derive(thiserror::Error, Debug)]
 pub enum BlockError {
