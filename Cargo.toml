@@ -15,6 +15,7 @@ members = [
     "crates/time",
     "crates/pki",
     "crates/apiserver",
+    "crates/machinectl",
 ]
 
 [workspace.package]
@@ -45,6 +46,7 @@ prost = "0.13"
 tonic-build = "0.12"
 protoc-bin-vendored = "3"
 tokio-stream = "0.1"
+clap = { version = "4", features = ["derive"] }
 
 # internal crates
 machined-common = { path = "crates/common" }
