@@ -171,6 +171,19 @@ enum FinalAction {
     Reset,
 }
 
+/// A final syscall (reboot/poweroff) failed: PID1 must never exit. Enter the
+/// emergency state and park forever.
+async fn park_after_failed_final(
+    platform: &Arc<dyn Platform>,
+    // `+ Sync` so the future is Send (it is held across .await in spawned tasks).
+    err: &(dyn std::fmt::Display + Sync),
+) {
+    emergency::enter_emergency(platform, err, false);
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    }
+}
+
 /// Reset: re-format STATE + EPHEMERAL in place (labels preserved) so the next
 /// boot reprovisions fresh volumes. Best-effort — failures log and the reset
 /// still proceeds to reboot.
@@ -368,12 +381,14 @@ async fn run_daemon() -> anyhow::Result<()> {
             info!("rebooting");
             if let Err(e) = platform.reboot() {
                 error!("reboot failed: {e}");
+                park_after_failed_final(&platform, &e).await;
             }
         }
         FinalAction::Poweroff => {
             info!("powering off");
             if let Err(e) = platform.poweroff() {
                 error!("poweroff failed: {e}");
+                park_after_failed_final(&platform, &e).await;
             }
         }
         FinalAction::Reset => {
@@ -381,6 +396,7 @@ async fn run_daemon() -> anyhow::Result<()> {
             perform_reset(&state_for_reset, block_for_reset.as_ref()).await;
             if let Err(e) = platform.reboot() {
                 error!("reboot failed: {e}");
+                park_after_failed_final(&platform, &e).await;
             }
         }
     }
@@ -434,6 +450,21 @@ mod tests {
         svc_running(&state, "payload");
         // No RuntimeStatus anywhere — non-containerd ids don't need it.
         assert!(RuntimeReadiness.is_ready(&state, "payload"));
+    }
+
+    #[tokio::test]
+    async fn failed_final_parks_forever() {
+        let platform: Arc<dyn Platform> = Arc::new(machined_platform::FakePlatform::new());
+        let parked = tokio::spawn(async move {
+            park_after_failed_final(&platform, &"reboot failed (test)").await;
+        });
+        // It must NOT return.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(300), parked)
+                .await
+                .is_err(),
+            "park must never complete"
+        );
     }
 
     #[tokio::test]
