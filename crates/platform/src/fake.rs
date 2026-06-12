@@ -1,5 +1,6 @@
 //! In-memory fake platform that records operations instead of performing them.
 
+use std::path::Path;
 use std::sync::Mutex;
 
 use crate::{MountSpec, Platform, PlatformError, Result};
@@ -8,6 +9,8 @@ use crate::{MountSpec, Platform, PlatformError, Result};
 pub struct Recorded {
     pub mounts: Vec<MountSpec>,
     pub unmounts: Vec<String>,
+    /// Absolute `.ko` paths passed to `load_module`, in call order.
+    pub modules: Vec<String>,
     pub syncs: u32,
     /// Interleaved disk-op log ("sync", "unmount:<target>") so tests can pin
     /// cross-op ordering (e.g. sync-before-unmount), not just per-op order.
@@ -24,6 +27,9 @@ pub struct FakePlatform {
     pub cmdline: String,
     /// Targets whose plain unmount fails (busy simulation). Lazy always works.
     pub fail_unmount_targets: Mutex<Vec<String>>,
+    /// Targets whose `is_mounted` errors (unreadable-mountinfo simulation,
+    /// e.g. /proc not yet mounted on a fresh kernel).
+    pub fail_is_mounted_targets: Mutex<Vec<String>>,
 }
 
 impl FakePlatform {
@@ -32,13 +38,27 @@ impl FakePlatform {
             recorded: Mutex::new(Recorded::default()),
             cmdline: "console=ttyS0".into(),
             fail_unmount_targets: Mutex::new(Vec::new()),
+            fail_is_mounted_targets: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Test inspection: kernel modules loaded, in call order.
+    pub fn modules_loaded(&self) -> Vec<String> {
+        self.recorded.lock().unwrap().modules.clone()
     }
 }
 
 impl Platform for FakePlatform {
     fn mount(&self, spec: &MountSpec) -> Result<()> {
         self.recorded.lock().unwrap().mounts.push(spec.clone());
+        Ok(())
+    }
+    fn load_module(&self, path: &Path) -> Result<()> {
+        self.recorded
+            .lock()
+            .unwrap()
+            .modules
+            .push(path.to_string_lossy().to_string());
         Ok(())
     }
     fn set_sysctl(&self, key: &str, value: &str) -> Result<()> {
@@ -57,6 +77,17 @@ impl Platform for FakePlatform {
         Ok(self.cmdline.clone())
     }
     fn is_mounted(&self, target: &str) -> Result<bool> {
+        if self
+            .fail_is_mounted_targets
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|t| t == target)
+        {
+            return Err(PlatformError::Other(format!(
+                "is_mounted {target}: mountinfo unreadable (fake)"
+            )));
+        }
         Ok(self
             .recorded
             .lock()
@@ -124,6 +155,44 @@ mod tests {
         assert_eq!(rec.mounts[0].target, "/proc");
         assert_eq!(rec.sysctls[0], ("net.ipv4.ip_forward".into(), "1".into()));
         assert_eq!(rec.hostname.as_deref(), Some("node-1"));
+    }
+
+    #[test]
+    fn mount_essential_skips_already_mounted() {
+        let p = FakePlatform::new();
+        p.mount(&essential_mounts()[0]).unwrap(); // /proc pre-mounted
+        p.mount_essential().unwrap();
+        let rec = p.recorded.lock().unwrap();
+        // /proc recorded exactly once, not twice.
+        assert_eq!(rec.mounts.iter().filter(|m| m.target == "/proc").count(), 1);
+        assert_eq!(rec.mounts.len(), essential_mounts().len());
+    }
+
+    #[test]
+    fn mount_essential_mounts_everything_when_is_mounted_errors() {
+        // Fresh-kernel simulation: /proc is not mounted yet, so the mountinfo
+        // read behind is_mounted fails. mount_essential must still mount
+        // EVERYTHING — a PID1 that mounts nothing panics the kernel.
+        let p = FakePlatform::new();
+        p.fail_is_mounted_targets
+            .lock()
+            .unwrap()
+            .push("/proc".into());
+        p.mount_essential().unwrap();
+        let rec = p.recorded.lock().unwrap();
+        assert_eq!(rec.mounts.len(), essential_mounts().len());
+        assert_eq!(rec.mounts[0].target, "/proc");
+    }
+
+    #[test]
+    fn fake_records_module_loads() {
+        let p = FakePlatform::new();
+        p.load_module(std::path::Path::new("/lib/modules/x/ext4.ko"))
+            .unwrap();
+        assert_eq!(
+            p.modules_loaded(),
+            vec!["/lib/modules/x/ext4.ko".to_string()]
+        );
     }
 
     #[test]

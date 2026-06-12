@@ -1,11 +1,11 @@
 //! machined — PID 1 / machine-management daemon entrypoint.
 
 mod emergency;
+mod imageboot;
 mod pid1;
 
 use std::net::SocketAddr;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use machined_apiserver::NodeAction;
@@ -122,24 +122,6 @@ impl machined_supervisor::ReadinessCheck for RuntimeReadiness {
 
 const NS_RUNTIME: &str = "runtime";
 
-/// Write a machinectl client bundle (ca + a fresh client cert) into `dir`.
-fn write_client_bundle(dir: &Path, pki: &NodePki) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    let client = pki.issue_client("machinectl")?;
-    std::fs::write(dir.join("ca.pem"), pki.ca_pem())?;
-    std::fs::write(dir.join("client.pem"), &client.cert_pem)?;
-    std::fs::write(dir.join("client.key"), &client.key_pem)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(
-            dir.join("client.key"),
-            std::fs::Permissions::from_mode(0o600),
-        )?;
-    }
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() {
     init_logging();
@@ -230,9 +212,47 @@ async fn run_daemon() -> anyhow::Result<()> {
     // PID-1 duties.
     pid1::spawn_reaper(shutdown.clone());
 
+    // Image boot (pid1 only): essential mounts first so /sys exists for the
+    // block scan, then modules → /boot → PKI seed; all no-ops off-image.
+    if std::process::id() == 1 {
+        if let Err(e) = platform.mount_essential() {
+            error!("early mounts: {e}");
+        }
+        if let Err(e) =
+            imageboot::load_modules(platform.as_ref(), Path::new(imageboot::MODULES_LOAD))
+        {
+            error!("module load: {e}");
+        }
+        if let Err(e) = imageboot::mount_boot(
+            build_block_backend_for_discovery().as_ref(),
+            platform.as_ref(),
+        )
+        .await
+        {
+            error!("boot partition mount: {e}");
+        }
+        // KNOWN RACE (M7b): this seed runs BEFORE the STATE volume is mounted
+        // at /system/state, so it lands on the initramfs rootfs and is later
+        // SHADOWED by the STATE mount. On a warm boot, a fast STATE mount can
+        // expose an empty /system/state/pki to the PKI init below, which then
+        // mints a FRESH CA — locking out the baked machinectl client bundle.
+        // M7b reorders PKI init to run after the STATE mount; until then CI
+        // must remain a single cold boot.
+        if let Err(e) = imageboot::seed_pki(
+            Path::new(imageboot::BOOT_PKI),
+            Path::new("/system/state/pki"),
+        ) {
+            error!("pki seed: {e}");
+        }
+    }
+
     // Load config first so the controllers can be built from it (fall back to
     // an empty config if the file is absent, so a bare boot still comes up).
-    let config_path = PathBuf::from(DEFAULT_CONFIG_PATH);
+    // The boot partition's config wins over the on-disk default when present.
+    let config_path = imageboot::pick_config_path(
+        Path::new(imageboot::BOOT_CONFIG),
+        Path::new(DEFAULT_CONFIG_PATH),
+    );
     let (config, _raw) = match load_from_path(&config_path) {
         Ok(v) => v,
         Err(e) => {
@@ -297,10 +317,14 @@ async fn run_daemon() -> anyhow::Result<()> {
     let mut api_handle: Option<tokio::task::JoinHandle<()>> = None;
     match NodePki::load_or_generate(&pki_dir, "node", &["127.0.0.1".into(), "localhost".into()]) {
         Ok(pki) => {
-            if let Err(e) = write_client_bundle(&pki_dir.join("machinectl"), &pki) {
+            if let Err(e) =
+                machined_pki::write_client_bundle(&pki_dir.join("machinectl"), &pki, "machinectl")
+            {
                 error!("writing machinectl bundle: {e}");
             }
-            let api_addr: SocketAddr = "127.0.0.1:50000".parse().unwrap();
+            // Bind all interfaces: mTLS authenticates every connection, and
+            // QEMU hostfwd / real NICs deliver to the NIC address, not loopback.
+            let api_addr: SocketAddr = "0.0.0.0:50000".parse().unwrap();
             let api_state = state.clone();
             let api_action_tx = api_action_tx.clone();
             let api_token = shutdown.clone();

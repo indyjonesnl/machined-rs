@@ -53,6 +53,10 @@ enum Command {
         cache: PathBuf,
     },
     /// Generate a node PKI dir (CA + server identity + machinectl client bundle).
+    ///
+    /// SECURITY: when this dir is baked into an image, it lands world-readable on
+    /// the FAT boot partition (FAT has no unix permissions). Treat the resulting
+    /// image / SD card as containing private key material.
     GenPki {
         #[arg(long)]
         out: PathBuf,
@@ -62,6 +66,6 @@ enum Command {
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Build { .. } => anyhow::bail!("not implemented yet"),
-        Command::GenPki { .. } => anyhow::bail!("not implemented yet"),
+        Command::GenPki { out } => pki::gen_pki(&out),
     }
 }

@@ -1094,6 +1094,7 @@ dependencies = [
  "machined-supervisor",
  "machined-time",
  "nix 0.29.0",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
