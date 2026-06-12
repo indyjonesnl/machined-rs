@@ -24,3 +24,12 @@ runtime is genuinely ready (process up **and** CRI `RuntimeReady`). See
 cargo build --workspace
 make pre-commit   # fmt + clippy -D warnings + test
 ```
+
+## Privileged tests
+
+`make root-tests` runs the `#[ignore]`d privileged integration tests for
+`machined-platform`, `machined-block`, `machined-netlink`, `machined-time`,
+and `machined-cri` under `sudo -E`. Requirements: a Linux host, passwordless
+or interactive sudo, and loop-device support; the containerd CRI test
+additionally needs a running containerd at
+`/run/containerd/containerd.sock`.
