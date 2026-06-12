@@ -34,6 +34,8 @@ pub enum ServiceState {
     Preparing,
     /// Waiting for dependencies to become ready.
     Waiting,
+    /// Drained by a stop request.
+    Stopped,
     Running,
     Finished,
     Skipped,

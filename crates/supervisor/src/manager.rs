@@ -144,10 +144,11 @@ impl ServiceManager {
             if let Some(pid) = pid {
                 #[cfg(unix)]
                 {
-                    use nix::sys::signal::{kill, Signal};
+                    use nix::sys::signal::{killpg, Signal};
                     use nix::unistd::Pid;
-                    match kill(Pid::from_raw(pid as i32), Signal::SIGTERM) {
-                        Ok(()) => info!(service = %h.id, "sent SIGTERM"),
+                    let pgid = Pid::from_raw(pid as i32); // leader pid == pgid
+                    match killpg(pgid, Signal::SIGTERM) {
+                        Ok(()) => info!(service = %h.id, "sent SIGTERM to group"),
                         Err(nix::errno::Errno::ESRCH) => {}
                         Err(e) => warn!(service = %h.id, "SIGTERM failed: {e}"),
                     }
@@ -163,6 +164,12 @@ impl ServiceManager {
                 }
                 Err(_) => {
                     warn!(service = %h.id, "grace expired; killing");
+                    #[cfg(unix)]
+                    if let Some(pid) = *h.pid.lock().unwrap() {
+                        use nix::sys::signal::{killpg, Signal};
+                        use nix::unistd::Pid;
+                        let _ = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL);
+                    }
                     h.join.abort();
                     let _ = h.join.await;
                     // The aborted task can't publish its own final status —
@@ -305,12 +312,43 @@ mod tests {
             Resource::ServiceStatus(s) => {
                 assert_eq!(
                     s.state,
-                    ServiceState::Finished,
-                    "TERM-trapped exit 0 → Finished"
+                    ServiceState::Stopped,
+                    "TERM-trapped drain → Stopped"
                 )
             }
             _ => panic!(),
         }
+    }
+
+    #[tokio::test]
+    async fn stop_kills_the_whole_process_group() {
+        let state = State::new();
+        let mut mgr = ServiceManager::new(state.clone());
+        // sh forks a grandchild sleep; on TERM sh exits 0 but WITHOUT group
+        // signaling the grandchild would survive.
+        mgr.start_all(
+            &[svc_full(
+                "forker",
+                &["sh", "-c", "sleep 30 & trap 'exit 0' TERM; wait"],
+                5,
+            )],
+            Arc::new(crate::readiness::DefaultReadiness),
+        )
+        .unwrap();
+        wait_running(&state, "forker").await;
+        let pgid = mgr.handles[0].pid.lock().unwrap().expect("pid");
+
+        mgr.stop_all().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // The WHOLE group is gone (grandchild included): signal 0 probe → ESRCH.
+        use nix::sys::signal::killpg;
+        use nix::unistd::Pid;
+        assert_eq!(
+            killpg(Pid::from_raw(pgid as i32), None),
+            Err(nix::errno::Errno::ESRCH),
+            "process group must be fully dead"
+        );
     }
 
     #[tokio::test]
@@ -375,12 +413,12 @@ mod tests {
         wait_running(&state, "dependent").await;
 
         mgr.stop_all().await;
-        // Both Finished; handles popped in reverse (dependent first) — the
+        // Both Stopped; handles popped in reverse (dependent first) — the
         // sequential drain proves ordering structurally (handles is a stack).
         for id in ["dep", "dependent"] {
             let k = Key::new("runtime", ResourceType::ServiceStatus, id);
             match state.get(&k).unwrap().spec {
-                Resource::ServiceStatus(s) => assert_eq!(s.state, ServiceState::Finished),
+                Resource::ServiceStatus(s) => assert_eq!(s.state, ServiceState::Stopped),
                 _ => panic!(),
             }
         }

@@ -86,7 +86,7 @@ pub async fn run_supervised<R: Runner>(
     let backoff = Duration::from_millis(100);
     loop {
         if stop.load(Ordering::SeqCst) {
-            publish_status(state, &id, ServiceState::Finished, true, "stopped");
+            publish_status(state, &id, ServiceState::Stopped, true, "stopped");
             return;
         }
         // Gate on deps, but stay responsive to the stop intent while parked
@@ -100,11 +100,15 @@ pub async fn run_supervised<R: Runner>(
             } => {}
         }
         if stop.load(Ordering::SeqCst) {
-            publish_status(state, &id, ServiceState::Finished, true, "stopped");
+            publish_status(state, &id, ServiceState::Stopped, true, "stopped");
             return;
         }
         let outcome = run_service(state, &mut runner).await;
-        if stop.load(Ordering::SeqCst) || !should_restart(policy, outcome) {
+        if stop.load(Ordering::SeqCst) {
+            publish_status(state, &id, ServiceState::Stopped, true, "drained");
+            return;
+        }
+        if !should_restart(policy, outcome) {
             return;
         }
         info!(service = %id, ?outcome, "restarting service");

@@ -45,6 +45,25 @@ impl Runner for ProcessRunner {
             .split_first()
             .ok_or_else(|| RunnerError::Other(format!("service {} has empty command", self.id)))?;
 
+        #[cfg(unix)]
+        let child = {
+            let mut cmd = Command::new(program);
+            cmd.args(args)
+                // Own process group so stop can signal the whole tree
+                // (grandchildren of forking payloads must die too).
+                .process_group(0)
+                // Kill the child if its task is aborted/dropped, so shutdown
+                // (which aborts the supervising task) does not orphan the
+                // process onto PID 1; the manager delivers SIGTERM + grace
+                // before that kill.
+                .kill_on_drop(true);
+            cmd.spawn()
+        }
+        .map_err(|source| RunnerError::Spawn {
+            id: self.id.clone(),
+            source,
+        })?;
+        #[cfg(not(unix))]
         let child = Command::new(program)
             .args(args)
             // Kill the child if its task is aborted/dropped, so shutdown
