@@ -168,6 +168,46 @@ enum FinalAction {
     Stop,
     Reboot,
     Poweroff,
+    Reset,
+}
+
+/// Map a VolumeStatus fs string to a mkfs type. Unknown → None (skip).
+fn fs_type_of(fs: &str) -> Option<machined_block::FsType> {
+    match fs {
+        "ext4" => Some(machined_block::FsType::Ext4),
+        "vfat" => Some(machined_block::FsType::Vfat),
+        "xfs" => Some(machined_block::FsType::Xfs),
+        "swap" => Some(machined_block::FsType::Swap),
+        _ => None,
+    }
+}
+
+/// Reset: re-format STATE + EPHEMERAL in place (labels preserved) so the next
+/// boot reprovisions fresh volumes. Best-effort — failures log and the reset
+/// still proceeds to reboot.
+async fn perform_reset(
+    state: &machined_runtime_core::State,
+    prov: &dyn machined_block::BlockProvisioner,
+) {
+    use machined_resources::{Key, Resource, ResourceType};
+    for label in ["STATE", "EPHEMERAL"] {
+        let key = Key::new("block", ResourceType::VolumeStatus, label);
+        let vol = match state.get(&key).map(|o| o.spec) {
+            Ok(Resource::VolumeStatus(v)) => v,
+            _ => {
+                warn!("reset: no VolumeStatus for {label}; skipping");
+                continue;
+            }
+        };
+        let Some(fs) = fs_type_of(&vol.fs) else {
+            warn!("reset: unknown fs '{}' for {label}; skipping", vol.fs);
+            continue;
+        };
+        info!("reset: formatting {} ({}, {label})", vol.device, vol.fs);
+        if let Err(e) = prov.format(&vol.device, fs, label).await {
+            error!("reset: format {} failed: {e}", vol.device);
+        }
+    }
 }
 
 async fn run_daemon() -> anyhow::Result<()> {
@@ -208,6 +248,7 @@ async fn run_daemon() -> anyhow::Result<()> {
     runtime.register(Box::new(ResolverController::at_etc()));
 
     let block = build_block_provisioner();
+    let block_for_reset = block.clone();
     // BlockProvisioner is a supertrait of BlockBackend; a fresh trait object for
     // discovery is built from the same concrete type.
     runtime.register(Box::new(DiskDiscoveryController::new(
@@ -273,6 +314,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         Err(e) => error!("PKI init failed; management API disabled: {e}"),
     }
 
+    let state_for_reset = state.clone();
     let ctx = SequencerCtx {
         state,
         platform: platform.clone(),
@@ -294,18 +336,14 @@ async fn run_daemon() -> anyhow::Result<()> {
         a = api_action_rx.recv() => match a {
             Some(NodeAction::Reboot) => FinalAction::Reboot,
             Some(NodeAction::Shutdown) => FinalAction::Poweroff,
-            Some(NodeAction::Reset) => FinalAction::Reboot, // Task 2: FinalAction::Reset
+            Some(NodeAction::Reset) => FinalAction::Reset,
             None => FinalAction::Stop,
         },
     };
     info!("shutting down");
 
-    // Shutdown.
-    if let Err(e) = shutdown_sequence().run(&ctx).await {
-        error!("shutdown sequence error: {e}");
-    }
-
-    // Stop the runtime and join.
+    // Stop the controller runtime FIRST: no controller may act (e.g. re-mount)
+    // while services stop, volumes unmount, or a reset formats partitions.
     shutdown.cancel();
     let _ = rt_handle.await;
     if let Some(mut h) = api_handle {
@@ -317,6 +355,11 @@ async fn run_daemon() -> anyhow::Result<()> {
             h.abort();
             let _ = h.await;
         }
+    }
+
+    // Graceful stop + disk teardown.
+    if let Err(e) = shutdown_sequence().run(&ctx).await {
+        error!("shutdown sequence error: {e}");
     }
     info!("machined stopped");
 
@@ -332,6 +375,13 @@ async fn run_daemon() -> anyhow::Result<()> {
             info!("powering off");
             if let Err(e) = platform.poweroff() {
                 error!("poweroff failed: {e}");
+            }
+        }
+        FinalAction::Reset => {
+            info!("resetting: wiping STATE + EPHEMERAL, then rebooting");
+            perform_reset(&state_for_reset, block_for_reset.as_ref()).await;
+            if let Err(e) = platform.reboot() {
+                error!("reboot failed: {e}");
             }
         }
     }
@@ -385,5 +435,64 @@ mod tests {
         svc_running(&state, "payload");
         // No RuntimeStatus anywhere — non-containerd ids don't need it.
         assert!(RuntimeReadiness.is_ready(&state, "payload"));
+    }
+
+    #[test]
+    fn fs_type_maps() {
+        assert!(matches!(
+            fs_type_of("ext4"),
+            Some(machined_block::FsType::Ext4)
+        ));
+        assert!(matches!(
+            fs_type_of("vfat"),
+            Some(machined_block::FsType::Vfat)
+        ));
+        assert!(fs_type_of("ntfs").is_none());
+    }
+
+    #[tokio::test]
+    async fn reset_formats_exactly_state_and_ephemeral() {
+        use machined_resources::{VolumePhase, VolumeStatus};
+
+        let state = State::new();
+        for (label, dev, fs) in [
+            ("EFI", "/dev/vda1", "vfat"),
+            ("STATE", "/dev/vda2", "ext4"),
+            ("EPHEMERAL", "/dev/vda3", "ext4"),
+        ] {
+            let _ = state.create(ResourceObject::new(
+                "block",
+                label,
+                Resource::VolumeStatus(VolumeStatus {
+                    name: label.into(),
+                    device: dev.into(),
+                    fs: fs.into(),
+                    label: label.into(),
+                    phase: VolumePhase::Provisioned,
+                }),
+            ));
+        }
+        let fake = machined_block::FakeBlockBackend::new();
+        perform_reset(&state, &fake).await;
+
+        let formats = fake.formats();
+        assert_eq!(formats.len(), 2, "exactly STATE + EPHEMERAL");
+        assert!(formats.iter().any(|f| f.0 == "/dev/vda2"));
+        assert!(formats.iter().any(|f| f.0 == "/dev/vda3"));
+        assert!(
+            !formats.iter().any(|f| f.0 == "/dev/vda1"),
+            "EFI must NEVER be formatted by reset"
+        );
+        // No wipes / re-partitioning.
+        assert!(fake.wipes().is_empty());
+        assert!(fake.creates().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reset_without_volumes_degrades_to_noop() {
+        let state = State::new();
+        let fake = machined_block::FakeBlockBackend::new();
+        perform_reset(&state, &fake).await;
+        assert!(fake.formats().is_empty());
     }
 }
