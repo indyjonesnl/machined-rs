@@ -12,6 +12,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # No system protoc needed: protobuf codegen uses protoc-bin-vendored.
+      # The privileged test tier (make root-tests) is run manually on a host.
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy
