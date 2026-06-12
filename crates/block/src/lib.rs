@@ -133,6 +133,11 @@ pub trait BlockProvisioner: BlockBackend {
     async fn wipe(&self, disk: &str) -> Result<()>;
     /// Write a fresh GPT with `plan`; return the created partition device paths.
     async fn create_partitions(&self, disk: &str, plan: &[PartitionPlan]) -> Result<Vec<String>>;
+    /// Append `plan` to the disk's EXISTING GPT (no wipe, existing entries
+    /// untouched). REFUSES — writing nothing — if any plan label already
+    /// exists on the disk, so a re-entry against stale discovery is a loud
+    /// no-op. Returns the new partitions' device paths, in plan order.
+    async fn add_partitions(&self, disk: &str, plan: &[PartitionPlan]) -> Result<Vec<String>>;
     /// Create a filesystem on `device` with `label`.
     async fn format(&self, device: &str, fs: FsType, label: &str) -> Result<()>;
 }

@@ -211,6 +211,84 @@ fn reread_partition_table(path: &Path) -> Result<()> {
     })
 }
 
+/// Register new partitions with the kernel one-by-one via BLKPG_ADD_PARTITION
+/// — partprobe's method. Unlike BLKRRPART (which re-reads the WHOLE table and
+/// returns EBUSY whenever any partition of the disk is open, e.g. EFI mounted
+/// at /boot) BLKPG adds a single partition without disturbing its siblings.
+/// `parts` is (GPT entry index, first LBA, last LBA inclusive); `lb` is the
+/// logical block size in bytes.
+fn blkpg_add_partitions(path: &Path, lb: u64, parts: &[(u32, u64, u64)]) -> Result<()> {
+    use nix::libc;
+    use std::os::fd::AsRawFd;
+
+    // ABI from <linux/blkpg.h> — verified against the header:
+    //   struct blkpg_partition { long long start; long long length; int pno;
+    //                            char devname[64]; char volname[64]; };
+    //   struct blkpg_ioctl_arg { int op; int flags; int datalen; void *data; };
+    //   #define BLKPG _IO(0x12,105)        /* 0x1269 */
+    //   #define BLKPG_ADD_PARTITION 1
+    // start/length are BYTES (not sectors); devname/volname are unused/ignored.
+    const BLKPG_ADD_PARTITION: libc::c_int = 1;
+    #[repr(C)]
+    struct BlkpgPartition {
+        start: libc::c_longlong,
+        length: libc::c_longlong,
+        pno: libc::c_int,
+        devname: [u8; 64],
+        volname: [u8; 64],
+    }
+    #[repr(C)]
+    struct BlkpgIoctlArg {
+        op: libc::c_int,
+        flags: libc::c_int,
+        datalen: libc::c_int,
+        data: *mut libc::c_void,
+    }
+    // Compile-time ABI pins (root-only code unit tests can't reach): values
+    // taken from a C `sizeof`/`offsetof` run against <linux/blkpg.h> on x86_64
+    // (start@0, length@8, pno@16, devname@20, volname@84).
+    const _: () = assert!(std::mem::size_of::<BlkpgPartition>() == 152);
+    const _: () = assert!(std::mem::size_of::<BlkpgIoctlArg>() == 24);
+    nix::ioctl_write_ptr_bad!(blkpg, nix::request_code_none!(0x12, 105), BlkpgIoctlArg);
+
+    let f = fs::File::open(path).map_err(|source| BlockError::Io {
+        path: path.to_string_lossy().to_string(),
+        source,
+    })?;
+    for &(pno, first_lba, last_lba) in parts {
+        let mut part = BlkpgPartition {
+            start: (first_lba * lb) as libc::c_longlong,
+            length: ((last_lba - first_lba + 1) * lb) as libc::c_longlong,
+            pno: pno as libc::c_int,
+            devname: [0; 64],
+            volname: [0; 64],
+        };
+        let arg = BlkpgIoctlArg {
+            op: BLKPG_ADD_PARTITION,
+            flags: 0,
+            datalen: std::mem::size_of::<BlkpgPartition>() as libc::c_int,
+            data: std::ptr::addr_of_mut!(part).cast(),
+        };
+        // SAFETY: BLKPG/ADD_PARTITION only reads the well-formed arg + payload,
+        // both of which outlive the call; the fd is a valid open block device.
+        let res = unsafe { blkpg(f.as_raw_fd(), &arg) };
+        match res {
+            Ok(_) => {}
+            // Tolerated per partition: the kernel may already know this node
+            // (a previous interrupted attempt) — the existence check that
+            // follows in add_partitions is the real gate.
+            Err(nix::errno::Errno::EBUSY) | Err(nix::errno::Errno::EEXIST) => {}
+            Err(e) => {
+                return Err(BlockError::Gpt {
+                    device: path.to_string_lossy().to_string(),
+                    message: format!("BLKPG add partition {pno}: {e}"),
+                })
+            }
+        }
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl BlockProvisioner for SysfsBlock {
     async fn wipe(&self, disk: &str) -> Result<()> {
@@ -305,6 +383,135 @@ impl BlockProvisioner for SysfsBlock {
                     .to_string()
             })
             .collect())
+    }
+
+    async fn add_partitions(&self, disk: &str, plan: &[PartitionPlan]) -> Result<Vec<String>> {
+        let path = self.disk_path(disk);
+        let device = path.to_string_lossy().to_string();
+        // Inner scope: GptDisk is not Send, so it must be dropped before the
+        // awaits in the node-verification loop below.
+        let (lb, new_parts) = {
+            // Open the EXISTING table — initialized(true) — so the imager's GPT +
+            // EFI entry are preserved. No update_partitions(clear): we APPEND only.
+            let mut gdisk = gpt::GptConfig::new()
+                .writable(true)
+                .initialized(true)
+                .open(&path)
+                .map_err(|e| BlockError::Gpt {
+                    device: device.clone(),
+                    message: e.to_string(),
+                })?;
+            // REFUSE duplicate labels BEFORE writing anything: a re-entry against
+            // stale discovery (the controller thinking STATE is still missing when
+            // it was already appended) must be a loud no-op, not a fourth partition.
+            for p in plan {
+                if gdisk.partitions().values().any(|e| e.name == p.label) {
+                    return Err(BlockError::Gpt {
+                        device: device.clone(),
+                        message: format!(
+                            "partition {} already exists on {disk}; refusing to append",
+                            p.label
+                        ),
+                    });
+                }
+            }
+
+            let lb = u64::from(*gdisk.logical_block_size());
+            // Capture each new entry's GPT index + extents (for BLKPG and for the
+            // device paths) BEFORE write() — and so EFI's entry is never touched.
+            let mut new_parts: Vec<(u32, u64, u64)> = Vec::new();
+            for p in plan {
+                let ptype = match p.part_type {
+                    PartType::EfiSystem => gpt::partition_types::EFI,
+                    PartType::LinuxFilesystem => gpt::partition_types::LINUX_FS,
+                };
+                // size 0 → use the rest: the largest free run, in bytes. INVARIANT:
+                // a size-0 entry must be the LAST partition in the plan (mirrors
+                // create_partitions). The append layout upholds this — only
+                // EPHEMERAL is size 0.
+                let size = if p.size_bytes == 0 {
+                    let free_lba = gdisk
+                        .find_free_sectors()
+                        .into_iter()
+                        .map(|(_, len)| len)
+                        .max()
+                        .unwrap_or(0);
+                    free_lba.saturating_mul(lb)
+                } else {
+                    p.size_bytes
+                };
+                let id = gdisk
+                    .add_partition(&p.label, size, ptype, 0, None)
+                    .map_err(|e| BlockError::Gpt {
+                        device: device.clone(),
+                        message: e.to_string(),
+                    })?;
+                let entry = gdisk.partitions().get(&id).ok_or_else(|| BlockError::Gpt {
+                    device: device.clone(),
+                    message: format!("added partition {id} missing from table"),
+                })?;
+                new_parts.push((id, entry.first_lba, entry.last_lba));
+            }
+            gdisk.write().map_err(|e| BlockError::Gpt {
+                device: device.clone(),
+                message: e.to_string(),
+            })?;
+            (lb, new_parts)
+        };
+
+        // Make the kernel see the new partitions. BLKRRPART re-reads the whole
+        // table but returns EBUSY whenever ANY partition of the disk is open —
+        // and in THIS feature's primary scenario EFI is already mounted at
+        // /boot by pid1. Fall back to per-partition BLKPG_ADD_PARTITION
+        // (partprobe's method), which works with mounted siblings.
+        if reread_partition_table(&path).is_err() {
+            blkpg_add_partitions(&path, lb, &new_parts)?;
+        }
+
+        // Device-path numbering: the kernel names partition nodes by GPT entry
+        // index, and add_partition returned exactly those indices (for an
+        // append onto a gap-free table starting at 1: existing+1, existing+2,
+        // …). BLKPG above registered these same pno's, so path and kernel view
+        // agree by construction; should they ever diverge (exotic table with
+        // holes + BLKRRPART path), the existence check below fails hard before
+        // the caller can format anything.
+        let disk_name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| disk.to_string());
+        let devices: Vec<String> = new_parts
+            .iter()
+            .map(|&(id, ..)| {
+                self.dev_root
+                    .join(part_device(&disk_name, id))
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+
+        // VERIFY every returned node exists before handing them to format —
+        // devtmpfs node creation is fast but not synchronous with the ioctl.
+        // A missing node is a HARD error: never let the caller mkfs a path
+        // that may later resolve to the wrong partition.
+        for dev in &devices {
+            let mut present = Path::new(dev).exists();
+            for _ in 0..10 {
+                if present {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                present = Path::new(dev).exists();
+            }
+            if !present {
+                return Err(BlockError::Gpt {
+                    device: device.clone(),
+                    message: format!(
+                        "partition node {dev} did not appear after partition-table update"
+                    ),
+                });
+            }
+        }
+        Ok(devices)
     }
 
     async fn format(&self, device: &str, fs: FsType, label: &str) -> Result<()> {
