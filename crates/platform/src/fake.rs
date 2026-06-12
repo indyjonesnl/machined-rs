@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use crate::{MountSpec, Platform, Result};
+use crate::{MountSpec, Platform, PlatformError, Result};
 
 #[derive(Debug, Default)]
 pub struct Recorded {
@@ -22,6 +22,8 @@ pub struct Recorded {
 pub struct FakePlatform {
     pub recorded: Mutex<Recorded>,
     pub cmdline: String,
+    /// Targets whose plain unmount fails (busy simulation). Lazy always works.
+    pub fail_unmount_targets: Mutex<Vec<String>>,
 }
 
 impl FakePlatform {
@@ -29,6 +31,7 @@ impl FakePlatform {
         Self {
             recorded: Mutex::new(Recorded::default()),
             cmdline: "console=ttyS0".into(),
+            fail_unmount_targets: Mutex::new(Vec::new()),
         }
     }
 }
@@ -63,10 +66,30 @@ impl Platform for FakePlatform {
             .any(|m| m.target == target))
     }
     fn unmount(&self, target: &str) -> Result<()> {
+        if self
+            .fail_unmount_targets
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|t| t == target)
+        {
+            // Busy simulation: the mount stays and nothing is recorded.
+            return Err(PlatformError::Mount {
+                target: target.to_string(),
+                message: "busy (fake)".into(),
+            });
+        }
         let mut rec = self.recorded.lock().unwrap();
         rec.mounts.retain(|m| m.target != target);
         rec.unmounts.push(target.to_string());
         rec.disk_ops.push(format!("unmount:{target}"));
+        Ok(())
+    }
+    fn unmount_lazy(&self, target: &str) -> Result<()> {
+        let mut rec = self.recorded.lock().unwrap();
+        rec.mounts.retain(|m| m.target != target);
+        rec.unmounts.push(target.to_string());
+        rec.disk_ops.push(format!("unmount_lazy:{target}"));
         Ok(())
     }
     fn sync(&self) {
@@ -136,5 +159,32 @@ mod tests {
         let rec = p.recorded.lock().unwrap();
         assert_eq!(rec.unmounts, vec!["/var"]);
         assert_eq!(rec.syncs, 1);
+    }
+
+    #[test]
+    fn fail_target_plain_unmount_errs_lazy_succeeds() {
+        let p = FakePlatform::new();
+        p.mount(&MountSpec {
+            source: "/dev/x".into(),
+            target: "/var".into(),
+            fstype: "ext4".into(),
+            flags: 0,
+            data: None,
+        })
+        .unwrap();
+        p.fail_unmount_targets.lock().unwrap().push("/var".into());
+
+        // Plain unmount fails and records NOTHING; the mount stays.
+        assert!(p.unmount("/var").is_err());
+        assert!(p.is_mounted("/var").unwrap());
+        assert!(p.recorded.lock().unwrap().unmounts.is_empty());
+        assert!(p.recorded.lock().unwrap().disk_ops.is_empty());
+
+        // Lazy always works and flips is_mounted.
+        p.unmount_lazy("/var").unwrap();
+        assert!(!p.is_mounted("/var").unwrap());
+        let rec = p.recorded.lock().unwrap();
+        assert_eq!(rec.unmounts, vec!["/var"]);
+        assert_eq!(rec.disk_ops, vec!["unmount_lazy:/var"]);
     }
 }

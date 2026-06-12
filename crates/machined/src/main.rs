@@ -171,17 +171,6 @@ enum FinalAction {
     Reset,
 }
 
-/// Map a VolumeStatus fs string to a mkfs type. Unknown → None (skip).
-fn fs_type_of(fs: &str) -> Option<machined_block::FsType> {
-    match fs {
-        "ext4" => Some(machined_block::FsType::Ext4),
-        "vfat" => Some(machined_block::FsType::Vfat),
-        "xfs" => Some(machined_block::FsType::Xfs),
-        "swap" => Some(machined_block::FsType::Swap),
-        _ => None,
-    }
-}
-
 /// Reset: re-format STATE + EPHEMERAL in place (labels preserved) so the next
 /// boot reprovisions fresh volumes. Best-effort — failures log and the reset
 /// still proceeds to reboot.
@@ -189,9 +178,19 @@ async fn perform_reset(
     state: &machined_runtime_core::State,
     prov: &dyn machined_block::BlockProvisioner,
 ) {
+    use machined_block::FsType;
+    use machined_controllers::block::NS as BLOCK_NS;
     use machined_resources::{Key, Resource, ResourceType};
+    // per-label fallback when the recorded fs is empty/unknown (corrupt fs —
+    // exactly the volume reset most needs to wipe): the fixed layout's type.
+    fn fallback_fs(label: &str) -> Option<machined_block::FsType> {
+        match label {
+            "STATE" | "EPHEMERAL" => Some(machined_block::FsType::Ext4),
+            _ => None,
+        }
+    }
     for label in ["STATE", "EPHEMERAL"] {
-        let key = Key::new("block", ResourceType::VolumeStatus, label);
+        let key = Key::new(BLOCK_NS, ResourceType::VolumeStatus, label);
         let vol = match state.get(&key).map(|o| o.spec) {
             Ok(Resource::VolumeStatus(v)) => v,
             _ => {
@@ -199,7 +198,7 @@ async fn perform_reset(
                 continue;
             }
         };
-        let Some(fs) = fs_type_of(&vol.fs) else {
+        let Some(fs) = FsType::from_str_name(&vol.fs).or_else(|| fallback_fs(label)) else {
             warn!("reset: unknown fs '{}' for {label}; skipping", vol.fs);
             continue;
         };
@@ -437,19 +436,6 @@ mod tests {
         assert!(RuntimeReadiness.is_ready(&state, "payload"));
     }
 
-    #[test]
-    fn fs_type_maps() {
-        assert!(matches!(
-            fs_type_of("ext4"),
-            Some(machined_block::FsType::Ext4)
-        ));
-        assert!(matches!(
-            fs_type_of("vfat"),
-            Some(machined_block::FsType::Vfat)
-        ));
-        assert!(fs_type_of("ntfs").is_none());
-    }
-
     #[tokio::test]
     async fn reset_formats_exactly_state_and_ephemeral() {
         use machined_resources::{VolumePhase, VolumeStatus};
@@ -484,6 +470,37 @@ mod tests {
             "EFI must NEVER be formatted by reset"
         );
         // No wipes / re-partitioning.
+        assert!(fake.wipes().is_empty());
+        assert!(fake.creates().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reset_formats_state_with_empty_fs_via_fallback() {
+        use machined_resources::{VolumePhase, VolumeStatus};
+
+        let state = State::new();
+        // Empty fs string (e.g. corrupt/unprobeable filesystem) — exactly the
+        // volume a reset most needs to wipe; the fixed-layout fallback applies.
+        let _ = state.create(ResourceObject::new(
+            "block",
+            "STATE",
+            Resource::VolumeStatus(VolumeStatus {
+                name: "STATE".into(),
+                device: "/dev/vda2".into(),
+                fs: "".into(),
+                label: "STATE".into(),
+                phase: VolumePhase::Provisioned,
+            }),
+        ));
+        let fake = machined_block::FakeBlockBackend::new();
+        perform_reset(&state, &fake).await;
+
+        let formats = fake.formats();
+        assert_eq!(formats.len(), 1);
+        assert_eq!(formats[0].0, "/dev/vda2");
+        assert_eq!(formats[0].1, machined_block::FsType::Ext4);
+        assert_eq!(formats[0].2, "STATE");
+        // Still never wipes / re-partitions.
         assert!(fake.wipes().is_empty());
         assert!(fake.creates().is_empty());
     }

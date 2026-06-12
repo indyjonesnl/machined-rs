@@ -33,7 +33,10 @@ impl Task for SyncAndUnmount {
             match ctx.platform.is_mounted(target) {
                 Ok(true) => {
                     if let Err(e) = ctx.platform.unmount(target) {
-                        tracing::warn!("unmount {target}: {e}");
+                        tracing::warn!("unmount {target}: {e}; retrying lazy (MNT_DETACH)");
+                        if let Err(e2) = ctx.platform.unmount_lazy(target) {
+                            tracing::warn!("lazy unmount {target}: {e2}");
+                        }
                     }
                 }
                 Ok(false) => {}
@@ -94,6 +97,43 @@ mod tests {
         assert_eq!(
             rec.disk_ops,
             vec!["sync", "unmount:/var", "unmount:/system/state"]
+        );
+    }
+
+    #[tokio::test]
+    async fn busy_unmount_escalates_to_lazy() {
+        let state = State::new();
+        let platform = Arc::new(FakePlatform::new());
+        for (source, target) in [("/dev/sda2", "/var"), ("/dev/sda3", "/system/state")] {
+            platform
+                .mount(&MountSpec {
+                    source: source.into(),
+                    target: target.into(),
+                    fstype: "ext4".into(),
+                    flags: 0,
+                    data: None,
+                })
+                .unwrap();
+        }
+        // /var is busy: its plain unmount fails, forcing the lazy escalation.
+        platform
+            .fail_unmount_targets
+            .lock()
+            .unwrap()
+            .push("/var".into());
+        let ctx = SequencerCtx {
+            state: state.clone(),
+            platform: platform.clone(),
+            provider: Provider::new(MachineConfig::default()),
+            services: Arc::new(Mutex::new(ServiceManager::new(state))),
+            readiness: Arc::new(DefaultReadiness),
+        };
+        shutdown_sequence().run(&ctx).await.unwrap();
+
+        let rec = platform.recorded.lock().unwrap();
+        assert_eq!(
+            rec.disk_ops,
+            vec!["sync", "unmount_lazy:/var", "unmount:/system/state"]
         );
     }
 }

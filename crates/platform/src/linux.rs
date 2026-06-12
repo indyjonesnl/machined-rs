@@ -75,6 +75,15 @@ impl Platform for LinuxPlatform {
         })
     }
 
+    fn unmount_lazy(&self, target: &str) -> Result<()> {
+        nix::mount::umount2(target, nix::mount::MntFlags::MNT_DETACH).map_err(|e| {
+            PlatformError::Mount {
+                target: target.to_string(),
+                message: format!("umount2(MNT_DETACH): {e}"),
+            }
+        })
+    }
+
     fn sync(&self) {
         nix::unistd::sync();
     }
