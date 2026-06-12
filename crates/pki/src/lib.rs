@@ -19,6 +19,8 @@ pub enum PkiError {
         #[source]
         source: std::io::Error,
     },
+    #[error("partial PKI dir; missing: {0:?}")]
+    Partial(Vec<String>),
 }
 
 pub type Result<T> = std::result::Result<T, PkiError>;
@@ -83,6 +85,7 @@ pub fn generate_cert(ca: &CertKey, cn: &str, role: CertRole, sans: &[String]) ->
 }
 
 /// The node's persistent PKI: a CA and a server identity, load-or-generated.
+#[derive(Debug)]
 pub struct NodePki {
     ca: CertKey,
     server: CertKey,
@@ -122,17 +125,41 @@ fn write_key(path: &Path, data: &str) -> Result<()> {
 impl NodePki {
     /// Load the CA + server identity from `dir`, generating + persisting them if
     /// absent. Idempotent: a second call with the same dir loads the same CA.
+    /// A PARTIAL dir (some of the four files missing) is an error — silently
+    /// re-keying over remnants would orphan previously-issued client certs.
     pub fn load_or_generate(dir: &Path, server_cn: &str, server_sans: &[String]) -> Result<Self> {
         fs::create_dir_all(dir).map_err(|source| PkiError::Io {
             path: dir.to_string_lossy().to_string(),
             source,
         })?;
+        // The PKI dir holds private keys: owner-only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(|source| {
+                PkiError::Io {
+                    path: dir.to_string_lossy().to_string(),
+                    source,
+                }
+            })?;
+        }
         let cap = dir.join("ca.pem");
         let cak = dir.join("ca.key");
         let sp = dir.join("server.pem");
         let sk = dir.join("server.key");
 
-        if cap.exists() && cak.exists() && sp.exists() && sk.exists() {
+        let missing: Vec<&str> = [
+            ("ca.pem", &cap),
+            ("ca.key", &cak),
+            ("server.pem", &sp),
+            ("server.key", &sk),
+        ]
+        .iter()
+        .filter(|(_, p)| !p.exists())
+        .map(|(name, _)| *name)
+        .collect();
+
+        if missing.is_empty() {
             return Ok(Self {
                 ca: CertKey {
                     cert_pem: read(&cap)?,
@@ -143,6 +170,11 @@ impl NodePki {
                     key_pem: read(&sk)?,
                 },
             });
+        }
+        if missing.len() != 4 {
+            return Err(PkiError::Partial(
+                missing.into_iter().map(String::from).collect(),
+            ));
         }
 
         let ca = generate_ca()?;
@@ -196,6 +228,27 @@ mod tests {
         let p2 = NodePki::load_or_generate(&dir, "node", &["127.0.0.1".into()]).unwrap();
         // Second call loads the same CA, not a fresh one.
         assert_eq!(p1.ca_pem(), p2.ca_pem());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn partial_pki_dir_errors_not_rekeys() {
+        let dir = std::env::temp_dir().join(format!("mnd-pki-part-{}", std::process::id()));
+        NodePki::load_or_generate(&dir, "node", &["127.0.0.1".into()]).unwrap();
+        std::fs::remove_file(dir.join("server.key")).unwrap();
+        let err = NodePki::load_or_generate(&dir, "node", &["127.0.0.1".into()]).unwrap_err();
+        assert!(err.to_string().contains("server.key"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pki_dir_is_0700() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("mnd-pki-700-{}", std::process::id()));
+        NodePki::load_or_generate(&dir, "node", &["127.0.0.1".into()]).unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
         std::fs::remove_dir_all(&dir).ok();
     }
 

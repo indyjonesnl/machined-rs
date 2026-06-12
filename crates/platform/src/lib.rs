@@ -62,6 +62,8 @@ pub trait Platform: Send + Sync {
     fn is_mounted(&self, target: &str) -> Result<bool>;
     /// Unmount the filesystem at `target`.
     fn unmount(&self, target: &str) -> Result<()>;
+    /// Lazily unmount `target` (detach now, clean up when no longer busy).
+    fn unmount_lazy(&self, target: &str) -> Result<()>;
     /// Flush filesystem buffers to disk.
     fn sync(&self);
     fn reboot(&self) -> Result<()>;

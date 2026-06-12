@@ -50,6 +50,17 @@ impl FsType {
             FsType::Swap => "swap",
         }
     }
+
+    /// Parse the canonical lowercase name ("ext4", "vfat", "xfs", "swap").
+    pub fn from_str_name(s: &str) -> Option<Self> {
+        Some(match s {
+            "ext4" => FsType::Ext4,
+            "vfat" => FsType::Vfat,
+            "xfs" => FsType::Xfs,
+            "swap" => FsType::Swap,
+            _ => return None,
+        })
+    }
 }
 
 /// An enumerated disk.
@@ -124,4 +135,30 @@ pub trait BlockProvisioner: BlockBackend {
     async fn create_partitions(&self, disk: &str, plan: &[PartitionPlan]) -> Result<Vec<String>>;
     /// Create a filesystem on `device` with `label`.
     async fn format(&self, device: &str, fs: FsType, label: &str) -> Result<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fs_type_from_str_name_maps_canonical_names() {
+        for (name, expected) in [
+            ("ext4", FsType::Ext4),
+            ("vfat", FsType::Vfat),
+            ("xfs", FsType::Xfs),
+            ("swap", FsType::Swap),
+        ] {
+            assert_eq!(FsType::from_str_name(name), Some(expected));
+            // Round-trips with as_str.
+            assert_eq!(expected.as_str(), name);
+        }
+        assert_eq!(FsType::from_str_name("ntfs"), None);
+        assert_eq!(FsType::from_str_name(""), None);
+        assert_eq!(
+            FsType::from_str_name("EXT4"),
+            None,
+            "canonical lowercase only"
+        );
+    }
 }

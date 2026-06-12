@@ -82,11 +82,13 @@ async fn boots_supervises_and_shuts_down() {
     }
     assert!(running, "payload service never reached Running");
 
+    // Mirrors run_daemon: the controller runtime stops before the shutdown sequence.
+    shutdown.cancel();
+    let _ = rt_handle.await;
+
     // Shutdown stops services cleanly.
     shutdown_sequence()
         .run(&ctx)
         .await
         .expect("shutdown succeeds");
-    shutdown.cancel();
-    let _ = rt_handle.await;
 }

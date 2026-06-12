@@ -16,7 +16,8 @@ pub trait ReadinessCheck: Send + Sync {
 
 /// Default rule: the dep's ServiceStatus is (Running && healthy) OR Finished —
 /// a run-once dependency that completed successfully is satisfied. Anything
-/// else (absent, Waiting, Preparing, Failed, Skipped, unhealthy) is not ready.
+/// else (absent, Waiting, Stopped, Preparing, Failed, Skipped, unhealthy) is
+/// not ready.
 pub struct DefaultReadiness;
 
 impl ReadinessCheck for DefaultReadiness {
@@ -95,6 +96,7 @@ mod tests {
         put(&state, "waiting", ServiceState::Waiting, false);
         put(&state, "preparing", ServiceState::Preparing, false);
         put(&state, "skipped", ServiceState::Skipped, false);
+        put(&state, "stopped", ServiceState::Stopped, true);
 
         assert!(r.is_ready(&state, "running-healthy"));
         assert!(!r.is_ready(&state, "running-unhealthy"));
@@ -103,6 +105,10 @@ mod tests {
         assert!(!r.is_ready(&state, "waiting"));
         assert!(!r.is_ready(&state, "preparing"));
         assert!(!r.is_ready(&state, "skipped"));
+        assert!(
+            !r.is_ready(&state, "stopped"),
+            "a drained service no longer serves its dependents"
+        );
     }
 
     #[tokio::test]
