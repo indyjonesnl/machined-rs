@@ -37,6 +37,12 @@ enum Command {
     Reboot,
     /// Power the node off.
     Shutdown,
+    /// Wipe STATE + EPHEMERAL and reboot to reprovision (DESTRUCTIVE).
+    Reset {
+        /// Confirm the destructive reset.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 fn read(path: &Path) -> anyhow::Result<String> {
@@ -62,6 +68,10 @@ async fn connect(bundle: &Path, endpoint: &str) -> anyhow::Result<MachineService
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    if let Command::Reset { yes: false } = cli.command {
+        eprintln!("reset wipes STATE and EPHEMERAL; pass --yes to confirm");
+        std::process::exit(2);
+    }
     let mut client = connect(&cli.bundle, &cli.endpoint).await?;
     match cli.command {
         Command::Version => {
@@ -96,6 +106,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Shutdown => {
             client.shutdown(Empty {}).await?;
             println!("shutdown requested");
+        }
+        Command::Reset { .. } => {
+            client.reset(Empty {}).await?;
+            println!("reset requested");
         }
     }
     Ok(())
@@ -144,5 +158,13 @@ mod tests {
         assert!(matches!(r.command, Command::Reboot));
         let s = Cli::try_parse_from(["machinectl", "shutdown"]).unwrap();
         assert!(matches!(s.command, Command::Shutdown));
+    }
+
+    #[test]
+    fn parses_reset_with_and_without_yes() {
+        let r = Cli::try_parse_from(["machinectl", "reset", "--yes"]).unwrap();
+        assert!(matches!(r.command, Command::Reset { yes: true }));
+        let r2 = Cli::try_parse_from(["machinectl", "reset"]).unwrap();
+        assert!(matches!(r2.command, Command::Reset { yes: false }));
     }
 }
