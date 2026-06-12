@@ -6,6 +6,7 @@ service MachineService {
   rpc ListResources(ListResourcesRequest) returns (ListResourcesResponse);
   rpc Reboot(Empty) returns (Empty);
   rpc Shutdown(Empty) returns (Empty);
+  rpc Reset(Empty) returns (Empty);
 }
 
 message Empty {}

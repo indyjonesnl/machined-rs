@@ -294,6 +294,7 @@ async fn run_daemon() -> anyhow::Result<()> {
         a = api_action_rx.recv() => match a {
             Some(NodeAction::Reboot) => FinalAction::Reboot,
             Some(NodeAction::Shutdown) => FinalAction::Poweroff,
+            Some(NodeAction::Reset) => FinalAction::Reboot, // Task 2: FinalAction::Reset
             None => FinalAction::Stop,
         },
     };

@@ -191,7 +191,7 @@ async fn reboot_and_shutdown_enqueue_actions() {
     use machined_apiserver::pb::Empty;
     use machined_apiserver::{Machine, NodeAction};
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+    let (tx, mut rx) = tokio::sync::mpsc::channel(3);
     let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
         Machine::new(State::new(), "9.9.9", tx),
     );
@@ -214,6 +214,8 @@ async fn reboot_and_shutdown_enqueue_actions() {
     assert_eq!(rx.recv().await, Some(NodeAction::Reboot));
     client.shutdown(Empty {}).await.unwrap();
     assert_eq!(rx.recv().await, Some(NodeAction::Shutdown));
+    client.reset(Empty {}).await.unwrap();
+    assert_eq!(rx.recv().await, Some(NodeAction::Reset));
 }
 
 #[tokio::test]

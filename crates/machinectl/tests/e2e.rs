@@ -116,5 +116,44 @@ async fn machinectl_queries_a_real_server() {
         Some(machined_apiserver::NodeAction::Reboot)
     );
 
+    // `reset` without --yes refuses CLIENT-SIDE: non-zero exit, nothing sent.
+    let refused = tokio::process::Command::new(bin)
+        .args([
+            "--bundle",
+            bundle.to_str().unwrap(),
+            "--endpoint",
+            &endpoint,
+            "reset",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(2), "must refuse without --yes");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), action_rx.recv())
+            .await
+            .is_err(),
+        "no action may reach the server on refusal"
+    );
+
+    // `reset --yes` delivers.
+    let out4 = tokio::process::Command::new(bin)
+        .args([
+            "--bundle",
+            bundle.to_str().unwrap(),
+            "--endpoint",
+            &endpoint,
+            "reset",
+            "--yes",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(out4.status.success(), "reset --yes failed: {:?}", out4);
+    assert_eq!(
+        action_rx.recv().await,
+        Some(machined_apiserver::NodeAction::Reset)
+    );
+
     std::fs::remove_dir_all(&root).ok();
 }

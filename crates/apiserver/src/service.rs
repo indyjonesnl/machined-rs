@@ -12,6 +12,7 @@ use crate::pb::{Empty, ListResourcesRequest, ListResourcesResponse, VersionRespo
 pub enum NodeAction {
     Reboot,
     Shutdown,
+    Reset,
 }
 
 /// gRPC service backed by the resource store.
@@ -82,6 +83,15 @@ impl MachineService for Machine {
         tracing::info!("shutdown requested via API");
         self.actions
             .send(NodeAction::Shutdown)
+            .await
+            .map_err(|_| Status::unavailable("daemon is shutting down"))?;
+        Ok(Response::new(Empty {}))
+    }
+
+    async fn reset(&self, _req: Request<Empty>) -> Result<Response<Empty>, Status> {
+        tracing::info!("reset requested via API");
+        self.actions
+            .send(NodeAction::Reset)
             .await
             .map_err(|_| Status::unavailable("daemon is shutting down"))?;
         Ok(Response::new(Empty {}))
