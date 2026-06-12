@@ -28,13 +28,23 @@ config.yaml on the FAT boot partition · full stack (containerd+runc) · QEMU bo
   non-goal in M7** — the disk image, initramfs, and code paths are identical, only the kernel
   hand-off differs.
 
-**Initramfs is the OS.** A small cpio: static-musl `machined` as `/init`, plus busybox-static and
-a static `mkfs.ext4`/`mkfs.vfat` (the block backend shells out to mkfs). It stays resident in RAM,
-so it must stay small (target < 20 MB compressed) — which is why containerd does NOT live here.
+**Initramfs is the OS.** A small cpio: static-musl `machined` as `/init`, plus `mkfs.ext4` with its
+musl libs from pinned Alpine apks (the block backend shells out to mkfs), and the kernel-module
+subset the target needs (Alpine builds virtio/ext4/vfat as modules; the imager resolves the
+modules.dep closure and machined loads the list via `finit_module` at early boot — no busybox, no
+shell, no modprobe). It stays resident in RAM, so it must stay small (target < 20 MB compressed) —
+which is why containerd does NOT live here. *Plan-time amendments:* the management API binds
+`0.0.0.0:50000` (QEMU/real NICs deliver to the NIC address, not loopback; mTLS authenticates every
+connection); unseeded image boots re-key PKI each boot because PKI setup precedes the STATE mount —
+the `--pki-dir` seed avoids it, and the ordering fix lands in M7b.
 
 **Disk layout in the image:** GPT + one FAT partition (label `EFI`) only. STATE and EPHEMERAL are
-**not in the image** — machined provisions them on first boot via the existing guarded
-provisioner (`machine.install.disk` points at the boot disk, `wipe: false`).
+**not in the image** — machined provisions them on first boot. *Plan-time amendment:* the existing
+guard demands exact `{EFI,STATE,EPHEMERAL}` equality, so a flashed image would be `RefuseForeign`;
+M7a adds a fourth guarded decision, **CompleteLayout** (disk carries exactly one partition, labeled
+`EFI` → append STATE+EPHEMERAL into free space — sized to the real disk — and format only the new
+partitions; EFI never re-partitioned or formatted, pinned by tests; explicit `wipe: true` still
+outranks adoption).
 
 **FAT boot partition contents:**
 
