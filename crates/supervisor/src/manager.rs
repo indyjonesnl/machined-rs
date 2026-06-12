@@ -337,6 +337,13 @@ mod tests {
         .unwrap();
         wait_running(&state, "forker").await;
         let pgid = mgr.handles[0].pid.lock().unwrap().expect("pid");
+        // The child must actually be its own group leader (process_group(0));
+        // without this, the ESRCH probe below could pass vacuously.
+        assert_eq!(
+            nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(pgid as i32))).unwrap(),
+            nix::unistd::Pid::from_raw(pgid as i32),
+            "child must lead its own process group"
+        );
 
         mgr.stop_all().await;
         tokio::time::sleep(Duration::from_millis(200)).await;
