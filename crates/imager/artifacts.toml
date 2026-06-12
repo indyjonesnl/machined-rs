@@ -1,0 +1,6 @@
+# Pinned external artifacts. Every input to an image build is named here with
+# url + sha256; the fetcher refuses anything else. Re-pin deliberately.
+# kind = "apk": Alpine package, extracted into the initramfs rootfs.
+
+[artifact]
+x86_64 = []
