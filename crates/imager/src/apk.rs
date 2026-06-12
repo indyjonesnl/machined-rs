@@ -25,8 +25,6 @@ use std::path::Path;
 /// components), if a `.ko.gz` entry cannot be decompressed, or on any
 /// extraction I/O error (including the path-traversal refusal that
 /// `unpack_in` enforces).
-// wired in Task 10
-#[allow(dead_code)]
 pub fn extract_apk(apk: &Path, rootfs: &Path) -> anyhow::Result<()> {
     let file =
         std::fs::File::open(apk).with_context(|| format!("opening apk {}", apk.display()))?;

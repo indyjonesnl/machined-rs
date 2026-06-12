@@ -5,16 +5,12 @@ use anyhow::Context;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-// wired in Task 10
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct Manifest {
     /// arch → artifact list.
     pub artifact: BTreeMap<String, Vec<Artifact>>,
 }
 
-// wired in Task 10
-#[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct Artifact {
     pub name: String,
@@ -30,15 +26,11 @@ impl Manifest {
     /// # Errors
     ///
     /// Fails if the file cannot be read or is not valid manifest TOML.
-    // wired in Task 10
-    #[allow(dead_code)]
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading manifest {}", path.display()))?;
         toml::from_str(&text).with_context(|| format!("parsing manifest {}", path.display()))
     }
-    // wired in Task 10
-    #[allow(dead_code)]
     pub fn for_arch(&self, arch: &str) -> Option<&[Artifact]> {
         self.artifact.get(arch).map(|v| v.as_slice())
     }

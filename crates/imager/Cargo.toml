@@ -23,6 +23,4 @@ fatfs.workspace = true
 fscommon.workspace = true
 machined-config.workspace = true
 machined-pki.workspace = true
-
-[dev-dependencies]
 tempfile.workspace = true

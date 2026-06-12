@@ -11,8 +11,6 @@ pub trait Fetch {
     fn get(&self, url: &str) -> anyhow::Result<Vec<u8>>;
 }
 
-// wired in Task 10
-#[allow(dead_code)]
 pub struct HttpFetcher;
 
 impl Fetch for HttpFetcher {
@@ -33,8 +31,6 @@ impl Fetch for HttpFetcher {
 /// Fails if the pin is not 64 lowercase hex chars, if the download fails, if
 /// the downloaded bytes do not hash to the pin (a checksum mismatch is a hard
 /// error and leaves no cache entry behind), or on cache-dir I/O errors.
-// wired in Task 10
-#[allow(dead_code)]
 pub fn fetch_verified(
     fetcher: &dyn Fetch,
     url: &str,

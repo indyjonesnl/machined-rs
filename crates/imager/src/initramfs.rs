@@ -14,7 +14,6 @@ use std::path::Path;
 /// Returns an error if the machined binary or any rootfs file cannot be read,
 /// or if the rootfs contains a top-level `init` entry (which would collide with
 /// machined-as-/init).
-#[allow(dead_code)] // wired in Task 10
 pub fn build_initramfs(
     rootfs: &Path,
     machined: &Path,
@@ -67,7 +66,6 @@ pub fn build_initramfs(
     Ok(gz.finish()?)
 }
 
-#[allow(dead_code)] // wired in Task 10
 fn add_tree(w: &mut CpioWriter, root: &Path, dir: &Path) -> anyhow::Result<()> {
     use anyhow::Context;
 

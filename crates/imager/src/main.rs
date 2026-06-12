@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod apk;
+mod build;
 mod cpio;
 mod fetch;
 mod image;
@@ -65,7 +66,30 @@ enum Command {
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
-        Command::Build { .. } => anyhow::bail!("not implemented yet"),
+        Command::Build {
+            arch,
+            machined,
+            config,
+            out,
+            size,
+            pki_dir,
+            emit_boot,
+            manifest,
+            cache,
+        } => build::build(
+            &fetch::HttpFetcher,
+            &build::BuildOpts {
+                arch: &arch,
+                machined: &machined,
+                config: &config,
+                out: &out,
+                size,
+                pki_dir: pki_dir.as_deref(),
+                emit_boot: emit_boot.as_deref(),
+                manifest: &manifest,
+                cache: &cache,
+            },
+        ),
         Command::GenPki { out } => pki::gen_pki(&out),
     }
 }

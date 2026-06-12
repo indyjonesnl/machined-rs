@@ -25,8 +25,6 @@ fn module_name(path: &str) -> String {
 ///
 /// Returns an error if any name in `roots` is not declared as a line in
 /// `modules_dep`.
-// wired in Task 10
-#[allow(dead_code)]
 pub fn resolve_closure(modules_dep: &str, roots: &[&str]) -> anyhow::Result<Vec<String>> {
     let mut deps: BTreeMap<String, Vec<String>> = BTreeMap::new(); // path -> dep paths
     let mut by_name: BTreeMap<String, String> = BTreeMap::new(); // name -> path
@@ -69,8 +67,6 @@ pub fn resolve_closure(modules_dep: &str, roots: &[&str]) -> anyhow::Result<Vec<
 
 /// The module roots an x86_64 QEMU/virtio boot needs (Alpine linux-virt builds
 /// these =m): block + net + the three filesystems machined mounts.
-// wired in Task 10
-#[allow(dead_code)]
 pub const X86_64_QEMU_MODULES: &[&str] = &[
     "virtio_blk",
     "virtio_net",

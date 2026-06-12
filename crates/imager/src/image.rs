@@ -29,7 +29,6 @@ const GPT_OVERHEAD: u64 = 4 * 1024 * 1024;
 /// Returns an error if `size` is too small to hold the EFI partition plus GPT
 /// overhead, if the image cannot be created/written, or if the staging tree
 /// cannot be read or copied into the FAT filesystem.
-#[allow(dead_code)] // wired in Task 10
 pub fn write_image(img: &Path, size: u64, staging: &Path) -> anyhow::Result<()> {
     anyhow::ensure!(
         size >= EFI_SIZE + GPT_OVERHEAD,

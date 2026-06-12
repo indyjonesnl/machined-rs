@@ -10,13 +10,11 @@ const S_IFCHR: u32 = 0o020000;
 const S_IFREG: u32 = 0o100000;
 const S_IFLNK: u32 = 0o120000;
 
-#[allow(dead_code)] // wired in Task 6
 pub struct CpioWriter {
     buf: Vec<u8>,
     ino: u32,
 }
 
-#[allow(dead_code)] // wired in Task 6
 impl CpioWriter {
     pub fn new() -> Self {
         Self {
