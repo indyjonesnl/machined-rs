@@ -17,6 +17,7 @@ members = [
     "crates/apiserver",
     "crates/machinectl",
     "crates/cri",
+    "crates/imager",
 ]
 
 [workspace.package]
@@ -52,6 +53,15 @@ clap = { version = "4", features = ["derive"] }
 # hyper-util has no default features and TokioIo is behind `tokio`.
 tower = { version = "0.4", features = ["util"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
+ureq = "2"
+sha2 = "0.10"
+hex = "0.4"
+toml = "0.8"
+flate2 = "1"
+tar = "0.4"
+fatfs = "0.3"
+fscommon = "0.1"
+tempfile = "3"
 
 # internal crates
 machined-common = { path = "crates/common" }
