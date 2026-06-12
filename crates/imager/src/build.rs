@@ -517,6 +517,15 @@ kind = "apk"
         assert!(!f.out.exists());
     }
 
+    /// The shipped CI example must always parse against the live config schema:
+    /// this pins examples/node-ci.yaml against config-schema drift forever.
+    #[test]
+    fn ci_example_config_parses() {
+        let yaml = include_str!("../../../examples/node-ci.yaml");
+        machined_config::load_from_str(yaml)
+            .expect("examples/node-ci.yaml must parse against the config schema");
+    }
+
     #[test]
     fn checksum_mismatch_aborts() {
         let wrong = "00".repeat(32);

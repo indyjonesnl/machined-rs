@@ -1,6 +1,36 @@
 # Pinned external artifacts. Every input to an image build is named here with
 # url + sha256; the fetcher refuses anything else. Re-pin deliberately.
 # kind = "apk": Alpine package, extracted into the initramfs rootfs.
+#
+# Source: Alpine v3.21 main/x86_64 (dl-cdn.alpinelinux.org), pinned 2026-06.
+#
+# What each apk provides, and why it's here:
+#   linux-virt   boot/vmlinuz-virt + lib/modules/6.12.93-0-virt/* (modules.dep
+#                + the virtio/ext4/vfat/nls .ko.gz the closure resolver needs).
+#   musl         /lib/ld-musl-x86_64.so.1 (the ELF interpreter for every binary
+#                below) + libc.musl-x86_64.so.1.
+#   e2fsprogs    sbin/mke2fs (sbin/mkfs.ext4 -> mke2fs symlink) — the formatter
+#                machined runs inside the initramfs.
+#
+# mkfs.ext4 (= mke2fs) NEEDED-lib closure, each NEEDED resolved to its apk:
+#   libext2fs.so.2          e2fsprogs-libs   (NEEDED: libcom_err)
+#   libe2p.so.2             e2fsprogs-libs
+#   libcom_err.so.2         libcom_err
+#   libblkid.so.1           libblkid         (NEEDED: libeconf)
+#   libeconf.so.0           libeconf
+#   libuuid.so.1            libuuid
+#   libc.musl-x86_64.so.1   musl
+#   interpreter /lib/ld-musl-x86_64.so.1   musl
+# (e2fsprogs-libs also ships libss.so.2, which mke2fs does not NEED.)
 
 [artifact]
-x86_64 = []
+x86_64 = [
+  { name = "linux-virt", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/linux-virt-6.12.93-r0.apk", sha256 = "46851b49c0c8f7d689315556caff54df457238fd9c575b4e16837031a6653c27", kind = "apk" },
+  { name = "musl", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/musl-1.2.5-r11.apk", sha256 = "61e84757a8bfbc0d7fa8f4ce6de9cd4d791714369d78f6a08e5b03510fb2a623", kind = "apk" },
+  { name = "e2fsprogs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/e2fsprogs-1.47.1-r1.apk", sha256 = "f778a891aa832f40cf3be200b8ac346540c87fb90063e843f0d74044cff0b9c5", kind = "apk" },
+  { name = "e2fsprogs-libs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/e2fsprogs-libs-1.47.1-r1.apk", sha256 = "728d6d3c4d2f3a8d4384f64b00811f47c2ad1760f52b9e1ac82f88216c8fcbb3", kind = "apk" },
+  { name = "libcom_err", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libcom_err-1.47.1-r1.apk", sha256 = "71bd3a0c8590da126ac8372e0f2dd78007bc1f6471580e4d632cf2fa960dabeb", kind = "apk" },
+  { name = "libblkid", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libblkid-2.40.4-r1.apk", sha256 = "74dbd807a8e2a7e88bbdbd0a30329c467e7d6512c03644e373ef12d14d28e817", kind = "apk" },
+  { name = "libeconf", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libeconf-0.6.3-r0.apk", sha256 = "9bcd1c0d8fafa5532a0fe3c76a24dbbe06ef05d2f2c106c55074552251b446f0", kind = "apk" },
+  { name = "libuuid", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libuuid-2.40.4-r1.apk", sha256 = "67dd6b9a714841008389bfa5cb4e42fd0539cd873eaf904481babee49eb11454", kind = "apk" },
+]
