@@ -34,3 +34,6 @@ nix.workspace = true
 [dev-dependencies]
 async-trait.workspace = true
 tempfile.workspace = true
+# start_paused virtual time in the wait_for_state_mount tests; the workspace
+# tokio's "full" feature set does NOT include "test-util".
+tokio = { workspace = true, features = ["test-util"] }

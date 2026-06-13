@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use machined_block::BlockBackend;
 use machined_platform::{MountSpec, Platform};
+use machined_resources::{Resource, ResourceType};
+use machined_runtime_core::State;
 use tracing::{info, warn};
 
 pub const MODULES_LOAD: &str = "/etc/machined/modules.load";
@@ -123,10 +125,50 @@ pub fn seed_pki(src: &Path, dst: &Path) -> anyhow::Result<()> {
         let mode = if f.ends_with(".key") { 0o600 } else { 0o644 };
         std::fs::set_permissions(tmp.join(f), std::fs::Permissions::from_mode(mode))?;
     }
+    // fsync each staged file before the rename: ext4's auto_da_alloc heuristic
+    // does NOT cover rename-to-a-new-path, so without this a power cut just
+    // after the rename could leave a present dst dir shadowing zero-length keys
+    // — which load_or_generate would then read as a partial PKI (PkiError) and
+    // disable the API forever.
+    for f in FILES {
+        std::fs::File::open(tmp.join(f))
+            .and_then(|fh| fh.sync_all())
+            .with_context(|| format!("fsync {f}"))?;
+    }
     std::fs::rename(&tmp, dst)
         .with_context(|| format!("rename {} -> {}", tmp.display(), dst.display()))?;
+    // Persist the rename itself by syncing the parent directory.
+    if let Some(parent) = dst.parent() {
+        let _ = std::fs::File::open(parent).and_then(|d| d.sync_all());
+    }
     info!("seeded PKI from {}", src.display());
     Ok(())
+}
+
+/// True iff a `MountStatus` for the STATE volume reports it mounted.
+fn state_mounted(state: &State) -> bool {
+    state
+        .list("block", ResourceType::MountStatus)
+        .into_iter()
+        .any(|o| matches!(o.spec, Resource::MountStatus(m) if m.volume == "STATE" && m.mounted))
+}
+
+/// Block until the STATE volume is mounted (the controller runtime provisions
+/// then mounts it), polling at the same 200ms cadence as the supervisor's
+/// dep-gate. Returns false on timeout. Callers gate PKI seed/load on this so
+/// PKI lands on the persistent ext4 STATE, not the initramfs rootfs it would
+/// otherwise be shadowed on.
+pub async fn wait_for_state_mount(state: &State, timeout: std::time::Duration) -> bool {
+    let start = tokio::time::Instant::now();
+    loop {
+        if state_mounted(state) {
+            return true;
+        }
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
 }
 
 /// The boot partition's config wins when it exists.
@@ -263,6 +305,18 @@ mod tests {
             "staging dir renamed away"
         );
 
+        // Each seeded file is non-empty and matches the source (the fsync path must
+        // not truncate or drop content).
+        for f in ["ca.pem", "ca.key", "server.pem", "server.key"] {
+            let got = std::fs::read(dst.join(f)).unwrap();
+            assert!(!got.is_empty(), "{f} empty after seed");
+            assert_eq!(
+                got,
+                std::fs::read(src.join(f)).unwrap(),
+                "{f} content mismatch"
+            );
+        }
+
         // Second call must NEVER overwrite an existing dst.
         std::fs::write(src.join("ca.pem"), "EVIL").unwrap();
         seed_pki(&src, &dst).unwrap();
@@ -302,5 +356,74 @@ mod tests {
         // boot exists -> boot.
         std::fs::write(&boot, "x").unwrap();
         assert_eq!(pick_config_path(&boot, &fallback), boot);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_returns_true_when_state_mounted() {
+        use machined_resources::{MountStatus, Resource, ResourceObject};
+        use machined_runtime_core::State;
+        let state = State::new();
+        state
+            .create(ResourceObject::new(
+                "block",
+                "STATE",
+                Resource::MountStatus(MountStatus {
+                    volume: "STATE".into(),
+                    source: "/dev/vda2".into(),
+                    target: "/system/state".into(),
+                    fstype: "ext4".into(),
+                    mounted: true,
+                }),
+            ))
+            .unwrap();
+        assert!(wait_for_state_mount(&state, std::time::Duration::from_secs(60)).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_times_out_when_state_absent_or_other_volume() {
+        use machined_resources::{MountStatus, Resource, ResourceObject};
+        use machined_runtime_core::State;
+        let state = State::new();
+        // An EPHEMERAL mount must NOT satisfy the STATE wait.
+        state
+            .create(ResourceObject::new(
+                "block",
+                "EPHEMERAL",
+                Resource::MountStatus(MountStatus {
+                    volume: "EPHEMERAL".into(),
+                    source: "/dev/vda3".into(),
+                    target: "/var".into(),
+                    fstype: "ext4".into(),
+                    mounted: true,
+                }),
+            ))
+            .unwrap();
+        assert!(!wait_for_state_mount(&state, std::time::Duration::from_secs(60)).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_unblocks_when_state_appears_mid_wait() {
+        use machined_resources::{MountStatus, Resource, ResourceObject};
+        use machined_runtime_core::State;
+        let state = State::new();
+        let s2 = state.clone();
+        let waiter = tokio::spawn(async move {
+            wait_for_state_mount(&s2, std::time::Duration::from_secs(60)).await
+        });
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        state
+            .create(ResourceObject::new(
+                "block",
+                "STATE",
+                Resource::MountStatus(MountStatus {
+                    volume: "STATE".into(),
+                    source: "/dev/vda2".into(),
+                    target: "/system/state".into(),
+                    fstype: "ext4".into(),
+                    mounted: true,
+                }),
+            ))
+            .unwrap();
+        assert!(waiter.await.unwrap());
     }
 }

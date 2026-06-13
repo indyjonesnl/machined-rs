@@ -21,6 +21,24 @@ fn key(id: &str) -> Key {
     Key::new(NS, ResourceType::ServiceStatus, id)
 }
 
+/// Sleep `dur`, but wake early if the stop intent is set — so a stop during a
+/// long restart backoff is honoured promptly instead of holding stop_all for
+/// the full delay. Mirrors the dep-gate select! used in run_supervised.
+async fn backoff_sleep(
+    stop: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    dur: std::time::Duration,
+) {
+    use std::sync::atomic::Ordering;
+    tokio::select! {
+        () = tokio::time::sleep(dur) => {}
+        () = async {
+            while !stop.load(Ordering::SeqCst) {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        } => {}
+    }
+}
+
 /// Write/refresh the ServiceStatus resource for `id` in the store.
 pub fn publish_status(state: &State, id: &str, st: ServiceState, healthy: bool, message: &str) {
     let spec = ServiceStatusSpec {
@@ -83,7 +101,7 @@ pub async fn run_supervised<R: Runner>(
     deps: &[String],
 ) {
     let id = runner.id().to_string();
-    let backoff = Duration::from_millis(100);
+    let mut backoff = Duration::from_secs(1);
     loop {
         if stop.load(Ordering::SeqCst) {
             publish_status(state, &id, ServiceState::Stopped, true, "stopped");
@@ -103,6 +121,7 @@ pub async fn run_supervised<R: Runner>(
             publish_status(state, &id, ServiceState::Stopped, true, "stopped");
             return;
         }
+        let started = std::time::Instant::now();
         let outcome = run_service(state, &mut runner).await;
         if stop.load(Ordering::SeqCst) {
             publish_status(state, &id, ServiceState::Stopped, true, "drained");
@@ -111,8 +130,10 @@ pub async fn run_supervised<R: Runner>(
         if !should_restart(policy, outcome) {
             return;
         }
-        info!(service = %id, ?outcome, "restarting service");
-        tokio::time::sleep(backoff).await;
+        let (delay, next) = crate::restart::backoff_step(backoff, started.elapsed());
+        backoff = next;
+        info!(service = %id, ?outcome, ?delay, "restarting service after backoff");
+        backoff_sleep(&stop, delay).await;
     }
 }
 
@@ -194,7 +215,67 @@ mod tests {
         }
     }
 
+    // Always reports Failure, so a restart loop enters backoff every iteration.
+    struct AlwaysFail(String);
+    #[async_trait]
+    impl Runner for AlwaysFail {
+        fn id(&self) -> &str {
+            &self.0
+        }
+        async fn run(&mut self) -> crate::runner::Result<RunOutcome> {
+            Ok(RunOutcome::Failure)
+        }
+        async fn stop(&mut self) -> crate::runner::Result<()> {
+            Ok(())
+        }
+    }
+
+    // Runs in REAL time on purpose (NOT start_paused): the assertion is about
+    // wall-clock stop-responsiveness, and under start_paused a `timeout` is itself
+    // virtual — a non-stop-aware sleep would still complete in finite virtual time
+    // and the test could not distinguish a hang. The first failure arms the base
+    // 1s backoff; we request stop while parked in it and require the loop to return
+    // in well under that second. A non-stop-aware `sleep(backoff)` would hold for
+    // the full ~1s and blow the 400ms budget; the stop-aware backoff wakes at the
+    // 50ms stop-poll cadence.
     #[tokio::test]
+    async fn stop_during_backoff_returns_promptly() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let state = State::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (stop2, state2) = (stop.clone(), state.clone());
+        let h = tokio::spawn(async move {
+            run_supervised(
+                &state2,
+                AlwaysFail("loop".into()),
+                Policy::Always,
+                stop2,
+                Arc::new(DefaultReadiness),
+                &[],
+            )
+            .await;
+        });
+        // Let it fail once and enter the (1s) backoff sleep, then request stop.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        stop.store(true, Ordering::SeqCst);
+        let t = std::time::Instant::now();
+        tokio::time::timeout(Duration::from_secs(3), h)
+            .await
+            .expect("must stop promptly")
+            .unwrap();
+        let elapsed = t.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(400),
+            "stop during backoff must wake the sleep, not wait it out (took {elapsed:?})"
+        );
+        let k = Key::new("runtime", ResourceType::ServiceStatus, "loop");
+        match state.get(&k).unwrap().spec {
+            Resource::ServiceStatus(s) => assert_eq!(s.state, ServiceState::Stopped),
+            _ => panic!(),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn supervised_on_failure_restarts_until_success() {
         let state = State::new();
         let r = Scripted {
@@ -245,7 +326,7 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn supervised_restart_re_gates_on_deps() {
         // dep ready → first run happens; dep flips not-ready → the restart parks
         // in Waiting instead of re-running.
@@ -293,7 +374,9 @@ mod tests {
                 }),
             )
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(600)).await;
+        // Wait past the restart backoff (>=1s) so the loop completes its backoff
+        // sleep and re-gates: with the dep now not-ready it must park in Waiting.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
         let k = Key::new("runtime", ResourceType::ServiceStatus, "s");
         match state.get(&k).unwrap().spec {
             Resource::ServiceStatus(s) => assert_eq!(
