@@ -1,4 +1,4 @@
-.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 dist-aarch64 boot-test
+.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 dist-aarch64 boot-test boot-test-aarch64
 
 pre-commit: fmt clippy test
 
@@ -52,3 +52,8 @@ dist-aarch64:
 boot-test: dist-x86_64
 	cargo build --release -p machined-imager -p machinectl
 	./scripts/boot-test-x86_64.sh
+
+# Build the aarch64 image + boot it in qemu-system-aarch64 (TCG), assert the node comes up.
+boot-test-aarch64: dist-aarch64
+	cargo build --release -p machined-imager -p machinectl
+	./scripts/boot-test-aarch64.sh
