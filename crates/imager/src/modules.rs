@@ -74,6 +74,9 @@ pub const X86_64_QEMU_MODULES: &[&str] = &[
     "vfat",
     "nls_cp437",
     "nls_iso8859_1",
+    // The kernel's vfat default iocharset is utf8 (CONFIG_FAT_DEFAULT_IOCHARSET="utf8");
+    // without nls_utf8 the boot-partition mount EINVALs ("IO charset utf8 not found").
+    "nls_utf8",
 ];
 
 #[cfg(test)]

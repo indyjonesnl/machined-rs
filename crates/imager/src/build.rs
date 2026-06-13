@@ -226,7 +226,7 @@ mod tests {
     const KVER: &str = "6.12.81-0-virt";
 
     /// modules.dep for the QEMU closure: every X86_64_QEMU_MODULES root and its
-    /// transitive deps. nls_cp437/nls_iso8859_1 are dep-less roots.
+    /// transitive deps. nls_cp437/nls_iso8859_1/nls_utf8 are dep-less roots.
     const MODULES_DEP: &str = "\
 kernel/drivers/block/virtio_blk.ko.gz: kernel/drivers/virtio/virtio.ko.gz
 kernel/drivers/net/virtio_net.ko.gz: kernel/drivers/virtio/virtio.ko.gz
@@ -238,6 +238,7 @@ kernel/fs/fat/vfat.ko.gz: kernel/fs/fat/fat.ko.gz
 kernel/fs/fat/fat.ko.gz:
 kernel/fs/nls/nls_cp437.ko.gz:
 kernel/fs/nls/nls_iso8859_1.ko.gz:
+kernel/fs/nls/nls_utf8.ko.gz:
 ";
 
     /// All `.ko.gz` paths declared in MODULES_DEP (closure members) plus one
@@ -253,6 +254,7 @@ kernel/fs/nls/nls_iso8859_1.ko.gz:
         "kernel/fs/fat/fat.ko.gz",
         "kernel/fs/nls/nls_cp437.ko.gz",
         "kernel/fs/nls/nls_iso8859_1.ko.gz",
+        "kernel/fs/nls/nls_utf8.ko.gz",
     ];
     const UNUSED_KO_GZ: &str = "kernel/net/unused.ko.gz";
 
