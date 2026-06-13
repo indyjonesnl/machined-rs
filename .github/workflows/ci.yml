@@ -25,6 +25,7 @@ jobs:
   boot-test:
     runs-on: ubuntu-latest
     needs: check
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -45,6 +46,7 @@ jobs:
           path: target/imager-cache
           key: imager-artifacts-${{ hashFiles('crates/imager/artifacts.toml') }}
       - name: boot test
+        timeout-minutes: 35
         run: make boot-test
       - name: upload serial log
         if: failure()

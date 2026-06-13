@@ -53,15 +53,18 @@ qemu-system-x86_64 $KVM_FLAG -m 512 -machine q35 \
 QEMU=$!
 trap 'kill $QEMU 2>/dev/null || true; wait $QEMU 2>/dev/null || true' EXIT
 
-ctl() { "$CTL" --bundle "$WORK/pki/machinectl" --endpoint "https://127.0.0.1:${PORT}" "$@"; }
+# Hard-cap every CLI call: the client has its own connect/request timeouts, but
+# this is a belt-and-suspenders bound so a single call can never wedge the loop.
+ctl() { timeout 15 "$CTL" --bundle "$WORK/pki/machinectl" --endpoint "https://127.0.0.1:${PORT}" "$@"; }
 
 echo "waiting for API (max ${TIMEOUT}s)..."
-for i in $(seq "$TIMEOUT"); do
+deadline=$((SECONDS + TIMEOUT))
+while [ $SECONDS -lt $deadline ]; do
   if ctl version >/dev/null 2>&1; then break; fi
   if ! kill -0 $QEMU 2>/dev/null; then echo "QEMU died"; tail -50 "$SERIAL"; exit 1; fi
-  if [ "$i" = "$TIMEOUT" ]; then echo "TIMEOUT waiting for API"; tail -80 "$SERIAL"; exit 1; fi
   sleep 1
 done
+if [ $SECONDS -ge $deadline ]; then echo "TIMEOUT waiting for API"; tail -80 "$SERIAL"; exit 1; fi
 echo "API up: $(ctl version)"
 
 # machinectl `get` prints one row per resource: "<id>\t<k=v k=v ...>".
@@ -69,7 +72,8 @@ echo "API up: $(ctl version)"
 #   STATE     name=STATE device=/dev/vda2 fs=ext4 label=STATE phase=Provisioned
 # Assert both managed volumes are present AND Provisioned (CompleteLayout ran).
 echo "checking provisioned volumes (namespace block)..."
-for i in $(seq 60); do
+vol_deadline=$((SECONDS + 120))
+while [ $SECONDS -lt $vol_deadline ]; do
   VOLS=$(ctl get VolumeStatus --namespace block 2>/dev/null || true)
   if echo "$VOLS" | grep -Eq 'name=STATE .*phase=Provisioned' \
      && echo "$VOLS" | grep -Eq 'name=EPHEMERAL .*phase=Provisioned'; then

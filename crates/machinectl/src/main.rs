@@ -1,6 +1,7 @@
 //! machinectl — the machined management CLI (mutual-TLS gRPC client).
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use machined_apiserver::pb::machine_service_client::MachineServiceClient;
@@ -58,7 +59,13 @@ async fn connect(bundle: &Path, endpoint: &str) -> anyhow::Result<MachineService
         .ca_certificate(Certificate::from_pem(ca))
         .identity(Identity::from_pem(cert, key))
         .domain_name("127.0.0.1");
+    // A management CLI must never block forever on a dead node. With QEMU
+    // user-net (slirp), the host-side connect() to the forwarded port succeeds
+    // instantly even when the guest is dead, then the TLS handshake blocks
+    // indefinitely — so bound both the connect and the per-request time.
     let channel = Endpoint::from_shared(endpoint.to_string())?
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
         .tls_config(tls)?
         .connect()
         .await?;
