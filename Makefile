@@ -1,4 +1,4 @@
-.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 dist-aarch64 boot-test boot-test-aarch64
+.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 dist-aarch64 boot-test boot-test-aarch64 build-image-aarch64-rpi
 
 pre-commit: fmt clippy test
 
@@ -57,3 +57,8 @@ boot-test: dist-x86_64
 boot-test-aarch64: dist-aarch64
 	cargo build --release -p machined-imager -p machinectl
 	./scripts/boot-test-aarch64.sh
+
+# Build the aarch64-rpi (Pi 3A+) image and verify its FAT — no boot (manual Pi).
+build-image-aarch64-rpi: dist-aarch64
+	cargo build --release -p machined-imager -p machinectl
+	./scripts/build-test-aarch64-rpi.sh
