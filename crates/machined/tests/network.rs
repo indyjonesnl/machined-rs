@@ -18,7 +18,11 @@ use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
 async fn config_drives_network_through_controllers() {
-    let backend = Arc::new(FakeNetworkBackend::new().with_link("eth0", 1500));
+    let backend = Arc::new(
+        FakeNetworkBackend::new()
+            .with_link("eth0", 1500)
+            .with_link("lo", 65536),
+    );
 
     let config = MachineConfig {
         machine: MachineSection {
