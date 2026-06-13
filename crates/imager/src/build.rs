@@ -120,7 +120,7 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
                 .with_context(|| format!("copying PKI file {f}"))?;
         }
     }
-    image::write_image(o.out, o.size, &staging)?;
+    image::write_image(o.out, o.size, &staging, cfg.scheme)?;
     if let Some(dir) = o.emit_boot {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating emit-boot dir {}", dir.display()))?;

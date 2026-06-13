@@ -29,7 +29,23 @@ const GPT_OVERHEAD: u64 = 4 * 1024 * 1024;
 /// Returns an error if `size` is too small to hold the EFI partition plus GPT
 /// overhead, if the image cannot be created/written, or if the staging tree
 /// cannot be read or copied into the FAT filesystem.
-pub fn write_image(img: &Path, size: u64, staging: &Path) -> anyhow::Result<()> {
+pub fn write_image(
+    img: &Path,
+    size: u64,
+    staging: &Path,
+    scheme: crate::arch::PartScheme,
+) -> anyhow::Result<()> {
+    match scheme {
+        crate::arch::PartScheme::Gpt => write_image_gpt(img, size, staging),
+        crate::arch::PartScheme::Mbr => write_image_mbr(img, size, staging),
+    }
+}
+
+/// GPT + protective MBR with a single 512 MiB EFI-labeled FAT32 partition.
+///
+/// # Errors
+/// See [`write_image`].
+fn write_image_gpt(img: &Path, size: u64, staging: &Path) -> anyhow::Result<()> {
     anyhow::ensure!(
         size >= EFI_SIZE + GPT_OVERHEAD,
         "image size {size} too small (need at least {} bytes)",
@@ -99,6 +115,62 @@ pub fn write_image(img: &Path, size: u64, staging: &Path) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// Classic MBR: one FAT32 primary partition (type 0x0C, bootable) starting at
+/// LBA 2048, spanning the rest of the disk. Pi 3 firmware reads the MBR to find
+/// the boot FAT (it does not parse GPT). No second partition — machined boots
+/// entirely from the initramfs + this FAT.
+///
+/// # Errors
+/// Fails on I/O errors or if the image is too small.
+fn write_image_mbr(img: &Path, size: u64, staging: &Path) -> anyhow::Result<()> {
+    use std::io::{Seek as _, SeekFrom, Write as _};
+    const START_LBA: u64 = 2048; // 1 MiB alignment
+    anyhow::ensure!(size > (START_LBA + 2048) * LB, "image too small");
+    let mut file = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(img)
+        .with_context(|| format!("create {}", img.display()))?;
+    file.set_len(size)?;
+
+    let total_sectors = size / LB;
+    let part_sectors = u32::try_from(total_sectors - START_LBA).unwrap_or(u32::MAX);
+    let lba_start = u32::try_from(START_LBA).unwrap_or(u32::MAX);
+
+    let mut mbr = [0u8; 512];
+    let e = 446;
+    mbr[e] = 0x80; // bootable
+    mbr[e + 1] = 0xFE;
+    mbr[e + 2] = 0xFF;
+    mbr[e + 3] = 0xFF; // CHS start: LBA sentinel
+    mbr[e + 4] = 0x0C; // type: FAT32 LBA
+    mbr[e + 5] = 0xFE;
+    mbr[e + 6] = 0xFF;
+    mbr[e + 7] = 0xFF; // CHS end: LBA sentinel
+    mbr[e + 8..e + 12].copy_from_slice(&lba_start.to_le_bytes());
+    mbr[e + 12..e + 16].copy_from_slice(&part_sectors.to_le_bytes());
+    mbr[510] = 0x55;
+    mbr[511] = 0xAA;
+    file.seek(SeekFrom::Start(0))?;
+    file.write_all(&mbr)?;
+    drop(file);
+
+    let (start, end) = (START_LBA * LB, (START_LBA + u64::from(part_sectors)) * LB);
+    let file = std::fs::File::options().read(true).write(true).open(img)?;
+    let mut slice = fscommon::StreamSlice::new(file, start, end)?;
+    fatfs::format_volume(
+        &mut slice,
+        fatfs::FormatVolumeOptions::new()
+            .fat_type(fatfs::FatType::Fat32)
+            .volume_label(*b"BOOT       "),
+    )?;
+    let fs = fatfs::FileSystem::new(slice, fatfs::FsOptions::new())?;
+    copy_tree(&fs.root_dir(), staging)?;
+    Ok(())
+}
+
 /// Recursively copy a directory tree from `src` into a FAT directory.
 ///
 /// Symlinks in `staging` are FOLLOWED: `std::fs::metadata`/`File::open` follow
@@ -154,7 +226,13 @@ mod tests {
         std::fs::write(staging.join("vmlinuz"), b"kernel").unwrap();
         std::fs::write(staging.join("bin/tool"), b"t").unwrap();
 
-        write_image(&img, 2 * 1024 * 1024 * 1024, &staging).unwrap();
+        write_image(
+            &img,
+            2 * 1024 * 1024 * 1024,
+            &staging,
+            crate::arch::PartScheme::Gpt,
+        )
+        .unwrap();
 
         // GPT readable, exactly one partition, named EFI, type EFI system.
         let disk = gpt::GptConfig::new().writable(false).open(&img).unwrap();
@@ -202,7 +280,13 @@ mod tests {
         let staging = dir.path().join("staging");
         std::fs::create_dir_all(&staging).unwrap();
 
-        let err = write_image(&img, 100 * 1024 * 1024, &staging).unwrap_err();
+        let err = write_image(
+            &img,
+            100 * 1024 * 1024,
+            &staging,
+            crate::arch::PartScheme::Gpt,
+        )
+        .unwrap_err();
         assert!(
             err.to_string().contains("too small"),
             "error should mention 'too small': {err}"
@@ -221,12 +305,56 @@ mod tests {
         let staging = dir.path().join("staging");
         std::fs::create_dir_all(&staging).unwrap();
 
-        write_image(&img, 2 * 1024 * 1024 * 1024, &staging).unwrap();
+        write_image(
+            &img,
+            2 * 1024 * 1024 * 1024,
+            &staging,
+            crate::arch::PartScheme::Gpt,
+        )
+        .unwrap();
 
         let bytes = std::fs::read(&img).unwrap();
         // Boot signature at the end of LBA0.
         assert_eq!(&bytes[510..512], &[0x55, 0xAA]);
         // First MBR partition entry's type byte: 0xEE = GPT protective.
         assert_eq!(bytes[0x1C2], 0xEE);
+    }
+
+    #[test]
+    fn mbr_image_has_bootable_fat_primary_and_no_gpt() {
+        use crate::arch::PartScheme;
+        let dir = tempfile::tempdir().unwrap();
+        let img = dir.path().join("pi.img");
+        let staging = dir.path().join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("config.txt"), b"arm_64bit=1\n").unwrap();
+
+        write_image(&img, 1024 * 1024 * 1024, &staging, PartScheme::Mbr).unwrap();
+
+        let raw = std::fs::read(&img).unwrap();
+        assert_eq!(&raw[510..512], &[0x55, 0xAA], "MBR signature");
+        assert_eq!(raw[446], 0x80, "partition 1 bootable");
+        assert_eq!(raw[446 + 4], 0x0C, "partition 1 type FAT32 LBA");
+        let lba = u32::from_le_bytes(raw[446 + 8..446 + 12].try_into().unwrap());
+        let cnt = u32::from_le_bytes(raw[446 + 12..446 + 16].try_into().unwrap());
+        assert_eq!(lba, 2048, "FAT starts at LBA 2048");
+        assert!(cnt > 0);
+        assert_ne!(raw[446 + 4], 0xEE, "not a protective GPT MBR");
+        assert_ne!(&raw[512..520], b"EFI PART", "no GPT header");
+
+        let file = std::fs::File::options().read(true).open(&img).unwrap();
+        let slice = fscommon::StreamSlice::new(
+            file,
+            u64::from(lba) * 512,
+            (u64::from(lba) + u64::from(cnt)) * 512,
+        )
+        .unwrap();
+        let fs = fatfs::FileSystem::new(slice, fatfs::FsOptions::new()).unwrap();
+        let names: Vec<String> = fs
+            .root_dir()
+            .iter()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert!(names.contains(&"config.txt".to_string()), "{names:?}");
     }
 }

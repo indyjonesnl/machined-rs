@@ -21,7 +21,6 @@ pub struct ArchConfig {
     /// Initramfs module roots (resolved against modules.dep). Empty = no modules.
     pub module_roots: &'static [&'static str],
     /// Partition table scheme. Consumed by the image writer (M7c-2 Task 3).
-    #[allow(dead_code)]
     pub scheme: PartScheme,
     /// True when this arch needs Raspberry Pi firmware staging (M7c-2 Task 4).
     #[allow(dead_code)]
