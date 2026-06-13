@@ -53,3 +53,24 @@ aarch64 = [
   { name = "containerd", url = "https://github.com/containerd/containerd/releases/download/v2.0.9/containerd-static-2.0.9-linux-arm64.tar.gz", sha256 = "8f409c39562f11a116227e833797ab421a6ebde96f92aecd88ae0409a6bf1873", kind = "boot-tarball" },
   { name = "runc", url = "https://github.com/opencontainers/runc/releases/download/v1.4.3/runc.arm64", sha256 = "633301e2e32f8a5ad54031aab4901eb00308bec677dd15faa2751e8f9dab5ca4", kind = "boot-binary", rename = "runc" },
 ]
+
+# Source: Alpine v3.21 main/aarch64. Raspberry Pi 3A+ (Cortex-A53). Same aarch64
+# closure (musl/e2fsprogs/libs) + arm64 runtime as the aarch64 section, but the
+# kernel is linux-rpi (boot/vmlinuz-rpi = raw arm64 Image + the Pi DTBs) and the
+# GPU bootloader needs the raspberrypi-bootloader firmware blobs (bootcode.bin,
+# start.elf, fixup.dat) staged to the FAT boot partition.
+aarch64-rpi = [
+  { name = "linux-rpi", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/linux-rpi-6.12.13-r0.apk", sha256 = "3293972f523b9f833c091ad3de807294dde4c268a2756e5faeea8d6fbf6ff4ed", kind = "apk" },
+  { name = "raspberrypi-bootloader", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/raspberrypi-bootloader-1.20250210-r0.apk", sha256 = "1affbff4f11402aedcc5cdf4604d26e92422729378d23471a8e9d58ffd2a5451", kind = "apk" },
+  { name = "raspberrypi-bootloader-common", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/raspberrypi-bootloader-common-1.20250210-r0.apk", sha256 = "2813ec64112f96332c8ecbb8c65fe5623b423316ca0f2187a2132c60327be4e0", kind = "apk" },
+  { name = "musl", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/musl-1.2.5-r11.apk", sha256 = "721010e6bff908878d9c527428598661be59dde0d9f013f8431d01fd4dd16652", kind = "apk" },
+  { name = "e2fsprogs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/e2fsprogs-1.47.1-r1.apk", sha256 = "c28dddb51a40a91820a9f0dcd32f19abf23c8256543d7afc4f87363b28885a66", kind = "apk" },
+  { name = "e2fsprogs-libs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/e2fsprogs-libs-1.47.1-r1.apk", sha256 = "c817ddefbfa19245cce0c62820a1eb50c771f4999232d0a1c9e57521a58508d3", kind = "apk" },
+  { name = "libcom_err", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/libcom_err-1.47.1-r1.apk", sha256 = "0798fedbc002cada8e74a7cb4cdae885e5f0c1b5fd59b15af5b2903b95d30153", kind = "apk" },
+  { name = "libblkid", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/libblkid-2.40.4-r1.apk", sha256 = "61339f8737b05062f662cfc30c65cb34f10ccc53573846653551c66156c4aa0b", kind = "apk" },
+  { name = "libeconf", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/libeconf-0.6.3-r0.apk", sha256 = "db25f8abaf1ec61f5dcc0ff9b55271a3f6e43037e430b0c126ac000483e17dad", kind = "apk" },
+  { name = "libuuid", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/libuuid-2.40.4-r1.apk", sha256 = "d392ac96027cbe5ca9bc270d2aa4e99747b0eae3cf65a0087f2c6f13a7382702", kind = "apk" },
+  # GitHub-release static arm64 binaries staged to /boot/bin:
+  { name = "containerd", url = "https://github.com/containerd/containerd/releases/download/v2.0.9/containerd-static-2.0.9-linux-arm64.tar.gz", sha256 = "8f409c39562f11a116227e833797ab421a6ebde96f92aecd88ae0409a6bf1873", kind = "boot-tarball" },
+  { name = "runc", url = "https://github.com/opencontainers/runc/releases/download/v1.4.3/runc.arm64", sha256 = "633301e2e32f8a5ad54031aab4901eb00308bec677dd15faa2751e8f9dab5ca4", kind = "boot-binary", rename = "runc" },
+]

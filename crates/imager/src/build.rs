@@ -85,11 +85,23 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
     let dep_path = rootfs.join("lib/modules").join(&kver).join("modules.dep");
     let dep = std::fs::read_to_string(&dep_path)
         .with_context(|| format!("reading {}", dep_path.display()))?;
-    let mods = modules::resolve_closure(&dep, modules::VIRT_MODULES)?;
-    let kernel = rootfs.join("boot/vmlinuz-virt");
-    anyhow::ensure!(kernel.exists(), "kernel missing from linux-virt apk");
+    let cfg = crate::arch::arch_config(o.arch)
+        .ok_or_else(|| anyhow::anyhow!("unknown arch {}", o.arch))?;
+    let mods = modules::resolve_closure(&dep, cfg.module_roots)?;
+    let kernel = rootfs.join(cfg.kernel_path);
+    anyhow::ensure!(
+        kernel.exists(),
+        "kernel {} missing from apk",
+        cfg.kernel_path
+    );
     let kernel_bytes =
         std::fs::read(&kernel).with_context(|| format!("reading kernel {}", kernel.display()))?;
+
+    // Stage Pi GPU firmware + DTB while rootfs/boot still exists: the next step
+    // (prune_for_initramfs) deletes rootfs/boot, and the blobs live there.
+    if cfg.rpi_firmware {
+        crate::rpi::stage_pi_firmware(&rootfs, &staging)?;
+    }
 
     // 4. Initramfs carries ONLY the resolved closure, not all modules.
     prune_for_initramfs(&rootfs, &kver, &mods)?;
@@ -114,7 +126,7 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
                 .with_context(|| format!("copying PKI file {f}"))?;
         }
     }
-    image::write_image(o.out, o.size, &staging)?;
+    image::write_image(o.out, o.size, &staging, cfg.scheme)?;
     if let Some(dir) = o.emit_boot {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("creating emit-boot dir {}", dir.display()))?;
@@ -588,6 +600,16 @@ rename = "runc"
         let yaml = include_str!("../../../examples/node-ci.yaml");
         machined_config::load_from_str(yaml)
             .expect("examples/node-ci.yaml must parse against the config schema");
+    }
+
+    /// The shipped Pi example must always parse against the live config schema:
+    /// this pins examples/node-pi.yaml (no install, no network, runtime enabled)
+    /// against config-schema drift forever.
+    #[test]
+    fn pi_example_config_parses() {
+        let yaml = include_str!("../../../examples/node-pi.yaml");
+        machined_config::load_from_str(yaml)
+            .expect("examples/node-pi.yaml must parse against the config schema");
     }
 
     #[test]

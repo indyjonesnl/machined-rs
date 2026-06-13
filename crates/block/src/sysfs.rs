@@ -43,22 +43,81 @@ impl SysfsBlock {
         let path = self.dev_root.join(disk);
         let device = path.to_string_lossy().to_string();
         let cfg = gpt::GptConfig::new().writable(false);
-        let gpt_disk = cfg.open(&path).map_err(|e| BlockError::Gpt {
-            device: device.clone(),
-            message: e.to_string(),
-        })?;
-        let lb = *gpt_disk.logical_block_size();
+        match cfg.open(&path) {
+            Ok(gpt_disk) => {
+                let lb = *gpt_disk.logical_block_size();
+                let mut out = Vec::new();
+                for (idx, part) in gpt_disk.partitions() {
+                    out.push(PartEntry {
+                        device: part_device(disk, *idx),
+                        uuid: part.part_guid.to_string(),
+                        label: part.name.clone(),
+                        type_guid: part.part_type_guid.guid.to_string(),
+                        size_bytes: part.bytes_len(lb).unwrap_or(0),
+                    });
+                }
+                Ok(out)
+            }
+            // No readable GPT (MBR disk — e.g. the Raspberry Pi SD card has a
+            // DOS partition table, not GPT). Fall back to enumerating partitions
+            // straight from sysfs, which lists them regardless of table type.
+            // These carry no GPT metadata (empty label/uuid/type_guid); their
+            // filesystem is still fs-probed by list_volumes, so an MBR vfat /boot
+            // surfaces with fs_type = Vfat and the imageboot vfat fallback works.
+            Err(e) => {
+                let parts = self.read_sysfs_partitions(disk);
+                if parts.is_empty() {
+                    // Whole-disk with no partition table at all: propagate the
+                    // original error so the caller logs and skips this disk,
+                    // exactly as before.
+                    Err(BlockError::Gpt {
+                        device,
+                        message: e.to_string(),
+                    })
+                } else {
+                    Ok(parts)
+                }
+            }
+        }
+    }
+
+    /// Enumerate a disk's partitions from `/sys/block/<disk>/<part>` — the
+    /// kernel creates one subdir (with a `partition` index file and `size` in
+    /// 512-byte sectors) per partition, independent of GPT vs MBR. Used as the
+    /// MBR fallback when there is no GPT to read.
+    fn read_sysfs_partitions(&self, disk: &str) -> Vec<PartEntry> {
+        let disk_dir = self.sys_root.join("block").join(disk);
+        let Ok(entries) = fs::read_dir(&disk_dir) else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
-        for (idx, part) in gpt_disk.partitions() {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            // A partition subdir is named after the disk (sda -> sda1,
+            // mmcblk0 -> mmcblk0p1) and contains a `partition` index file.
+            if !name.starts_with(disk) {
+                continue;
+            }
+            let part_dir = disk_dir.join(&name);
+            // The `partition` file (an index) marks this subdir as a partition
+            // rather than e.g. `queue`/`power`; its value is unused (the device
+            // name comes from the subdir name itself).
+            if read_trim(&part_dir.join("partition")).is_none() {
+                continue;
+            }
+            let size_sectors: u64 = read_trim(&part_dir.join("size"))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
             out.push(PartEntry {
-                device: part_device(disk, *idx),
-                uuid: part.part_guid.to_string(),
-                label: part.name.clone(),
-                type_guid: part.part_type_guid.guid.to_string(),
-                size_bytes: part.bytes_len(lb).unwrap_or(0),
+                device: name,
+                uuid: String::new(),
+                label: String::new(),
+                type_guid: String::new(),
+                size_bytes: size_sectors.saturating_mul(512),
             });
         }
-        Ok(out)
+        out.sort_by(|a, b| a.device.cmp(&b.device));
+        out
     }
 }
 
@@ -628,5 +687,65 @@ mod tests {
         assert_eq!(parts[1].device, "sdz2");
         assert!(parts.iter().any(|p| p.label == "EFI"));
         assert!(parts.iter().any(|p| p.label == "STATE"));
+    }
+
+    // An MBR disk (no readable GPT, e.g. the Raspberry Pi SD card) must still
+    // surface its partitions — read from sysfs — so list_volumes can fs-probe
+    // them. They carry no GPT metadata (empty label/uuid/type_guid).
+    #[test]
+    fn read_partitions_falls_back_to_sysfs_for_mbr_disk() {
+        let base = std::env::temp_dir().join(format!("mnd-mbr-{}", std::process::id()));
+        let sys = base.join("sys");
+        let dev = base.join("dev");
+        let disk_dir = sys.join("block/mmcblk0");
+        // Two partition subdirs, each with a `partition` index and `size`.
+        for (name, idx, sectors) in [("mmcblk0p1", "1", "204800"), ("mmcblk0p2", "2", "2048000")] {
+            let pd = disk_dir.join(name);
+            fs::create_dir_all(&pd).unwrap();
+            let w = |p: PathBuf, v: &str| {
+                let mut f = fs::File::create(p).unwrap();
+                f.write_all(v.as_bytes()).unwrap();
+            };
+            w(pd.join("partition"), &format!("{idx}\n"));
+            w(pd.join("size"), &format!("{sectors}\n"));
+        }
+        // A /dev/mmcblk0 that is NOT a valid GPT (zeros) -> gpt open fails.
+        fs::create_dir_all(&dev).unwrap();
+        {
+            let f = fs::File::create(dev.join("mmcblk0")).unwrap();
+            f.set_len(4 * 1024 * 1024).unwrap();
+        }
+
+        let be = SysfsBlock::with_roots(&sys, &dev);
+        let parts = be.read_partitions("mmcblk0").unwrap();
+        fs::remove_dir_all(&base).ok();
+
+        assert_eq!(parts.len(), 2, "both MBR partitions surfaced from sysfs");
+        assert_eq!(parts[0].device, "mmcblk0p1");
+        assert_eq!(parts[1].device, "mmcblk0p2");
+        assert_eq!(parts[0].size_bytes, 204800 * 512);
+        // No GPT metadata on an MBR fallback partition.
+        assert!(parts
+            .iter()
+            .all(|p| p.label.is_empty() && p.uuid.is_empty()));
+    }
+
+    // A disk with neither a GPT nor any sysfs partition subdir yields the
+    // original GPT error, so list_volumes skips it exactly as before.
+    #[test]
+    fn read_partitions_propagates_error_when_no_table_and_no_sysfs_parts() {
+        let base = std::env::temp_dir().join(format!("mnd-empty-{}", std::process::id()));
+        let sys = base.join("sys");
+        let dev = base.join("dev");
+        fs::create_dir_all(sys.join("block/sdq")).unwrap(); // disk dir, no part subdirs
+        fs::create_dir_all(&dev).unwrap();
+        {
+            let f = fs::File::create(dev.join("sdq")).unwrap();
+            f.set_len(4 * 1024 * 1024).unwrap();
+        }
+        let be = SysfsBlock::with_roots(&sys, &dev);
+        let res = be.read_partitions("sdq");
+        fs::remove_dir_all(&base).ok();
+        assert!(res.is_err(), "no GPT and no sysfs partitions -> error");
     }
 }

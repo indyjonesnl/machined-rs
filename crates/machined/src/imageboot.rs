@@ -40,8 +40,11 @@ pub fn load_modules(platform: &dyn Platform, list: &Path) -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Mount the EFI-labeled GPT partition at /boot (vfat). With multiple EFI
-/// candidates the lowest device path wins, deterministically.
+/// Mount the boot partition at /boot (vfat). The EFI-labeled GPT partition is
+/// tried first (x86/aarch64 GPT images); with multiple EFI candidates the
+/// lowest device path wins, deterministically. When no EFI label exists (MBR
+/// images / Raspberry Pi), the first vfat partition is used as a fallback,
+/// again lowest device path first.
 pub async fn mount_boot(block: &dyn BlockBackend, platform: &dyn Platform) -> anyhow::Result<()> {
     let vols = match block.list_volumes().await {
         Ok(v) => v,
@@ -50,23 +53,36 @@ pub async fn mount_boot(block: &dyn BlockBackend, platform: &dyn Platform) -> an
             return Ok(());
         }
     };
+    // GPT EFI-labeled partition first (x86/aarch64 GPT images). With multiple
+    // EFI candidates the lowest device path wins, deterministically.
     let mut candidates: Vec<_> = vols.iter().filter(|v| v.partition_label == "EFI").collect();
     candidates.sort_by(|a, b| a.device.cmp(&b.device));
-    let Some(efi) = candidates.first() else {
-        return Ok(());
-    };
     if candidates.len() > 1 {
         warn!(
             "{} EFI-labeled partitions found; picking {}",
             candidates.len(),
-            efi.device
+            candidates[0].device
         );
     }
+    // Fallback (MBR images / Raspberry Pi): MBR carries no GPT partition label,
+    // so when no EFI-labeled partition exists, mount the first vfat partition.
+    // Deterministic by device path, mirroring the EFI pick.
+    let chosen = candidates.first().copied().or_else(|| {
+        let mut vfat: Vec<_> = vols
+            .iter()
+            .filter(|v| v.fs_type == Some(machined_block::FsType::Vfat))
+            .collect();
+        vfat.sort_by(|a, b| a.device.cmp(&b.device));
+        vfat.into_iter().next()
+    });
+    let Some(v) = chosen else {
+        return Ok(());
+    };
     if platform.is_mounted("/boot")? {
         return Ok(());
     }
     platform.mount(&MountSpec {
-        source: efi.device.clone(),
+        source: v.device.clone(),
         target: "/boot".into(),
         fstype: "vfat".into(),
         // ro,nosuid,nodev: machined only reads /boot, and nothing on a FAT
@@ -77,7 +93,7 @@ pub async fn mount_boot(block: &dyn BlockBackend, platform: &dyn Platform) -> an
             | machined_platform::MS_NODEV,
         data: None,
     })?;
-    info!("mounted boot partition {} at /boot", efi.device);
+    info!("mounted boot partition {} at /boot", v.device);
     Ok(())
 }
 
@@ -251,6 +267,76 @@ mod tests {
         let rec = platform.recorded.lock().unwrap();
         assert_eq!(rec.mounts.len(), 1);
         assert_eq!(rec.mounts[0].source, "/dev/vda1");
+    }
+
+    /// A volume on an MBR disk: a vfat filesystem but NO GPT "EFI" label.
+    fn vfat_volume(device: &str) -> VolumeInfo {
+        VolumeInfo {
+            device: device.into(),
+            disk: "mmcblk0".into(),
+            partition_uuid: String::new(),
+            partition_label: String::new(),
+            partition_type_guid: String::new(),
+            fs_type: Some(FsType::Vfat),
+            fs_label: None,
+            fs_uuid: None,
+            size_bytes: 1 << 20,
+        }
+    }
+
+    #[tokio::test]
+    async fn mount_boot_falls_back_to_vfat_when_no_efi_label() {
+        // An MBR disk (Raspberry Pi): a partition with fs_type vfat but no GPT
+        // "EFI" label. With no EFI candidate, mount_boot must fall back to the
+        // first vfat partition.
+        let backend = FakeBlockBackend::new().with_volume(vfat_volume("/dev/mmcblk0p1"));
+        let platform = Arc::new(FakePlatform::new());
+        mount_boot(&backend, platform.as_ref()).await.unwrap();
+        let rec = platform.recorded.lock().unwrap();
+        assert_eq!(rec.mounts.len(), 1);
+        assert_eq!(rec.mounts[0].source, "/dev/mmcblk0p1");
+        assert_eq!(rec.mounts[0].target, "/boot");
+        assert_eq!(rec.mounts[0].fstype, "vfat");
+        assert_eq!(
+            rec.mounts[0].flags,
+            machined_platform::MS_RDONLY
+                | machined_platform::MS_NOSUID
+                | machined_platform::MS_NODEV,
+            "fallback /boot must be ro,nosuid,nodev too"
+        );
+    }
+
+    #[tokio::test]
+    async fn mount_boot_prefers_efi_label_over_vfat_fallback() {
+        // A GPT disk with both an EFI-labeled partition and another vfat
+        // partition: the EFI label must win, never the vfat fallback.
+        let mut other = vfat_volume("/dev/vda9");
+        other.disk = "vda".into();
+        let backend = FakeBlockBackend::new()
+            .with_volume(other) // vfat, no label
+            .with_volume(efi_volume()); // /dev/vda1, label "EFI"
+        let platform = Arc::new(FakePlatform::new());
+        mount_boot(&backend, platform.as_ref()).await.unwrap();
+        let rec = platform.recorded.lock().unwrap();
+        assert_eq!(rec.mounts.len(), 1);
+        assert_eq!(rec.mounts[0].source, "/dev/vda1");
+        assert!(
+            !rec.mounts.iter().any(|m| m.source == "/dev/vda9"),
+            "the vfat fallback must not engage when an EFI label exists"
+        );
+    }
+
+    #[tokio::test]
+    async fn vfat_fallback_picks_lowest_device_deterministically() {
+        // Multiple vfat partitions, no EFI label: lowest device path wins.
+        let backend = FakeBlockBackend::new()
+            .with_volume(vfat_volume("/dev/mmcblk0p3"))
+            .with_volume(vfat_volume("/dev/mmcblk0p1"));
+        let platform = Arc::new(FakePlatform::new());
+        mount_boot(&backend, platform.as_ref()).await.unwrap();
+        let rec = platform.recorded.lock().unwrap();
+        assert_eq!(rec.mounts.len(), 1);
+        assert_eq!(rec.mounts[0].source, "/dev/mmcblk0p1");
     }
 
     #[tokio::test]

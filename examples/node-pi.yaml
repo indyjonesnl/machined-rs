@@ -1,0 +1,13 @@
+# Raspberry Pi 3A+ node. The Pi 3A+ has no built-in Ethernet (WiFi/BT only,
+# which machined doesn't configure), so this config brings up no network by
+# default — verify over the serial console. If you attach a USB-Ethernet
+# adapter, add a `network.interfaces` entry for it (it appears as a wired NIC).
+#
+# No `install:` block: the SD card uses an MBR single FAT (Pi 3 firmware reads
+# MBR, not GPT), so machined's GPT-based STATE/EPHEMERAL provisioning does not
+# run on the Pi — the node boots from the initramfs + the FAT /boot.
+machine:
+  hostname: node-pi
+  runtime:
+    disabled: false
+    binary: /boot/bin/containerd

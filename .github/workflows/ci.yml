@@ -94,3 +94,30 @@ jobs:
           name: boot-test-aarch64-serial-log
           path: target/boot-test/serial.log
           if-no-files-found: ignore
+
+  build-image-aarch64-rpi:
+    runs-on: ubuntu-latest
+    needs: check
+    timeout-minutes: 20
+    # Same prebuilt CI image. NO qemu / --device /dev/kvm: the Pi 3 firmware
+    # can't be emulated, so this job only builds the aarch64-rpi image and reads
+    # the FAT back to assert the Pi boot files are staged. The node itself is
+    # verified on real hardware. Proves the image builds + stages correctly.
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/indyjonesnl/machined-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: cache imager artifacts
+        uses: actions/cache@v4
+        with:
+          path: target/imager-cache
+          key: imager-artifacts-${{ hashFiles('crates/imager/artifacts.toml') }}
+      - name: build Pi 3A+ image (no boot)
+        run: make build-image-aarch64-rpi
