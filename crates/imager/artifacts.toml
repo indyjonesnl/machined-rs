@@ -37,3 +37,19 @@ x86_64 = [
   { name = "containerd", url = "https://github.com/containerd/containerd/releases/download/v2.0.9/containerd-static-2.0.9-linux-amd64.tar.gz", sha256 = "6cd7dc915982271ab634193ad7746cf2c7ef07fb4f37cf6f662b2bdcb6678013", kind = "boot-tarball" },
   { name = "runc", url = "https://github.com/opencontainers/runc/releases/download/v1.4.3/runc.amd64", sha256 = "f6ae8efc0fa40079e1475e97cbe9d1bd3f106a28d6af78a11d9f1bd565515e60", kind = "boot-binary", rename = "runc" },
 ]
+
+# Source: Alpine v3.21 main/aarch64; arm64 GitHub-release static binaries. Same
+# closure as x86_64 (musl interpreter is /lib/ld-musl-aarch64.so.1 here).
+aarch64 = [
+  { name = "linux-virt", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/linux-virt-6.12.93-r0.apk", sha256 = "6816957eb3e706732e7c81534fdb27bcb17684c6f47a6a2a47bfa8d756080e57", kind = "apk" },
+  { name = "musl", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/musl-1.2.5-r11.apk", sha256 = "721010e6bff908878d9c527428598661be59dde0d9f013f8431d01fd4dd16652", kind = "apk" },
+  { name = "e2fsprogs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/e2fsprogs-1.47.1-r1.apk", sha256 = "c28dddb51a40a91820a9f0dcd32f19abf23c8256543d7afc4f87363b28885a66", kind = "apk" },
+  { name = "e2fsprogs-libs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/e2fsprogs-libs-1.47.1-r1.apk", sha256 = "c817ddefbfa19245cce0c62820a1eb50c771f4999232d0a1c9e57521a58508d3", kind = "apk" },
+  { name = "libcom_err", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/libcom_err-1.47.1-r1.apk", sha256 = "0798fedbc002cada8e74a7cb4cdae885e5f0c1b5fd59b15af5b2903b95d30153", kind = "apk" },
+  { name = "libblkid", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/libblkid-2.40.4-r1.apk", sha256 = "61339f8737b05062f662cfc30c65cb34f10ccc53573846653551c66156c4aa0b", kind = "apk" },
+  { name = "libeconf", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/libeconf-0.6.3-r0.apk", sha256 = "db25f8abaf1ec61f5dcc0ff9b55271a3f6e43037e430b0c126ac000483e17dad", kind = "apk" },
+  { name = "libuuid", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/libuuid-2.40.4-r1.apk", sha256 = "d392ac96027cbe5ca9bc270d2aa4e99747b0eae3cf65a0087f2c6f13a7382702", kind = "apk" },
+  # GitHub-release static arm64 binaries staged to /boot/bin:
+  { name = "containerd", url = "https://github.com/containerd/containerd/releases/download/v2.0.9/containerd-static-2.0.9-linux-arm64.tar.gz", sha256 = "8f409c39562f11a116227e833797ab421a6ebde96f92aecd88ae0409a6bf1873", kind = "boot-tarball" },
+  { name = "runc", url = "https://github.com/opencontainers/runc/releases/download/v1.4.3/runc.arm64", sha256 = "633301e2e32f8a5ad54031aab4901eb00308bec677dd15faa2751e8f9dab5ca4", kind = "boot-binary", rename = "runc" },
+]

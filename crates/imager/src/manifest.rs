@@ -76,5 +76,16 @@ kind = "apk"
             && a.rename.as_deref() == Some("runc")));
         // The apk artifacts (kernel etc.) are still there.
         assert!(x86.iter().any(|a| a.kind == "apk"));
+        // aarch64 section present with the same shape (apk kernel + arm64 runtime).
+        let arm = m.for_arch("aarch64").expect("aarch64 arch present");
+        assert!(arm
+            .iter()
+            .any(|a| a.name == "linux-virt" && a.kind == "apk"));
+        assert!(arm
+            .iter()
+            .any(|a| a.name == "containerd" && a.kind == "boot-tarball"));
+        assert!(arm.iter().any(|a| a.name == "runc"
+            && a.kind == "boot-binary"
+            && a.rename.as_deref() == Some("runc")));
     }
 }
