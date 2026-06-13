@@ -146,9 +146,6 @@ pub fn seed_pki(src: &Path, dst: &Path) -> anyhow::Result<()> {
 }
 
 /// True iff a `MountStatus` for the STATE volume reports it mounted.
-// Wired into main.rs's PKI seed/load gate in the follow-up task; `pub` is no
-// dead-code shield in a bin crate, so allow it until the caller lands.
-#[allow(dead_code)]
 fn state_mounted(state: &State) -> bool {
     state
         .list("block", ResourceType::MountStatus)
@@ -161,7 +158,6 @@ fn state_mounted(state: &State) -> bool {
 /// dep-gate. Returns false on timeout. Callers gate PKI seed/load on this so
 /// PKI lands on the persistent ext4 STATE, not the initramfs rootfs it would
 /// otherwise be shadowed on.
-#[allow(dead_code)]
 pub async fn wait_for_state_mount(state: &State, timeout: std::time::Duration) -> bool {
     let start = tokio::time::Instant::now();
     loop {

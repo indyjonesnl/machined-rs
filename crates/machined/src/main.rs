@@ -253,19 +253,6 @@ async fn run_daemon() -> anyhow::Result<()> {
         {
             error!("boot partition mount: {e}");
         }
-        // KNOWN RACE (M7b): this seed runs BEFORE the STATE volume is mounted
-        // at /system/state, so it lands on the initramfs rootfs and is later
-        // SHADOWED by the STATE mount. On a warm boot, a fast STATE mount can
-        // expose an empty /system/state/pki to the PKI init below, which then
-        // mints a FRESH CA — locking out the baked machinectl client bundle.
-        // M7b reorders PKI init to run after the STATE mount; until then CI
-        // must remain a single cold boot.
-        if let Err(e) = imageboot::seed_pki(
-            Path::new(imageboot::BOOT_PKI),
-            Path::new("/system/state/pki"),
-        ) {
-            error!("pki seed: {e}");
-        }
     }
 
     // Load config first so the controllers can be built from it (fall back to
@@ -333,6 +320,24 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     // Action channel: API handlers enqueue; the main loop below consumes one.
     let (api_action_tx, mut api_action_rx) = tokio::sync::mpsc::channel::<NodeAction>(1);
+
+    // M7b: PKI must be seeded and loaded on the MOUNTED STATE volume, not the
+    // initramfs rootfs (where it would be shadowed by the later STATE mount,
+    // letting load_or_generate mint a fresh CA and lock out the baked client
+    // bundle). The controller runtime spawned above provisions + mounts STATE;
+    // wait for that, then seed. pid1-gated and only when an install disk is
+    // configured, so dev/test runs are unaffected.
+    if std::process::id() == 1 && provider.install().is_some() {
+        if !imageboot::wait_for_state_mount(&state, std::time::Duration::from_secs(60)).await {
+            warn!("STATE volume not mounted within 60s; PKI may not persist across reboots");
+        }
+        if let Err(e) = imageboot::seed_pki(
+            Path::new(imageboot::BOOT_PKI),
+            Path::new("/system/state/pki"),
+        ) {
+            error!("pki seed: {e}");
+        }
+    }
 
     // Management API (M3a): node PKI + mTLS gRPC server, sharing the COSI store.
     let pki_dir = std::path::PathBuf::from("/system/state/pki");
