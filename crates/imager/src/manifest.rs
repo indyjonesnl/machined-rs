@@ -87,5 +87,17 @@ kind = "apk"
         assert!(arm.iter().any(|a| a.name == "runc"
             && a.kind == "boot-binary"
             && a.rename.as_deref() == Some("runc")));
+        // aarch64-rpi section: Pi kernel + GPU firmware apks + arm64 runtime.
+        let rpi = m.for_arch("aarch64-rpi").expect("aarch64-rpi arch present");
+        assert!(rpi.iter().any(|a| a.name == "linux-rpi" && a.kind == "apk"));
+        assert!(rpi
+            .iter()
+            .any(|a| a.name == "raspberrypi-bootloader" && a.kind == "apk"));
+        assert!(rpi
+            .iter()
+            .any(|a| a.name == "raspberrypi-bootloader-common" && a.kind == "apk"));
+        assert!(rpi.iter().any(|a| a.name == "runc"
+            && a.kind == "boot-binary"
+            && a.rename.as_deref() == Some("runc")));
     }
 }
