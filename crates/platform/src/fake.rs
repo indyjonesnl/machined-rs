@@ -46,6 +46,11 @@ impl FakePlatform {
     pub fn modules_loaded(&self) -> Vec<String> {
         self.recorded.lock().unwrap().modules.clone()
     }
+
+    /// Mounts issued, in call order (test inspection).
+    pub fn mounts(&self) -> Vec<MountSpec> {
+        self.recorded.lock().unwrap().mounts.clone()
+    }
 }
 
 impl Platform for FakePlatform {
@@ -182,6 +187,22 @@ mod tests {
         let rec = p.recorded.lock().unwrap();
         assert_eq!(rec.mounts.len(), essential_mounts().len());
         assert_eq!(rec.mounts[0].target, "/proc");
+    }
+
+    #[test]
+    fn essential_mounts_include_cgroup2() {
+        let p = FakePlatform::new();
+        p.mount_essential().unwrap();
+        let m = p.mounts();
+        assert!(
+            m.iter()
+                .any(|s| s.target == "/sys/fs/cgroup" && s.fstype == "cgroup2"),
+            "cgroup2 must be mounted at /sys/fs/cgroup: {m:?}"
+        );
+        // /sys is still mounted before cgroup (cgroup2 lives under it).
+        let sys = m.iter().position(|s| s.target == "/sys");
+        let cg = m.iter().position(|s| s.target == "/sys/fs/cgroup");
+        assert!(sys < cg, "/sys must mount before /sys/fs/cgroup");
     }
 
     #[test]

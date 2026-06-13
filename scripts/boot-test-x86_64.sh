@@ -73,14 +73,29 @@ echo "API up: $(ctl version)"
 # Assert both managed volumes are present AND Provisioned (CompleteLayout ran).
 echo "checking provisioned volumes (namespace block)..."
 vol_deadline=$((SECONDS + 120))
+volumes_ok=0
 while [ $SECONDS -lt $vol_deadline ]; do
   VOLS=$(ctl get VolumeStatus --namespace block 2>/dev/null || true)
   if echo "$VOLS" | grep -Eq 'name=STATE .*phase=Provisioned' \
      && echo "$VOLS" | grep -Eq 'name=EPHEMERAL .*phase=Provisioned'; then
-    echo "$VOLS"; echo "BOOT TEST PASSED"; exit 0
+    echo "$VOLS"; volumes_ok=1; break
   fi
+  if ! kill -0 $QEMU 2>/dev/null; then echo "QEMU died"; tail -80 "$SERIAL"; exit 1; fi
   sleep 2
 done
-echo "volumes never provisioned (STATE+EPHEMERAL phase=Provisioned):"
-ctl get VolumeStatus --namespace block || true
-tail -80 "$SERIAL"; exit 1
+if [ "$volumes_ok" -ne 1 ]; then
+  echo "volumes never provisioned"; tail -80 "$SERIAL"; exit 1
+fi
+
+echo "checking runtime readiness (namespace runtime)..."
+rt_deadline=$((SECONDS + 120))
+while [ $SECONDS -lt $rt_deadline ]; do
+  RT=$(ctl get RuntimeStatus --namespace runtime 2>/dev/null || true)
+  if echo "$RT" | grep -Eq 'ready=true'; then
+    echo "$RT"; echo "BOOT TEST PASSED"; exit 0
+  fi
+  if ! kill -0 $QEMU 2>/dev/null; then echo "QEMU died"; tail -80 "$SERIAL"; exit 1; fi
+  sleep 2
+done
+echo "runtime never became ready:"; ctl get RuntimeStatus --namespace runtime || true
+tail -120 "$SERIAL"; exit 1

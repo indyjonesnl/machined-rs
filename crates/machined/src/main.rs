@@ -213,7 +213,7 @@ async fn perform_reset(
 fn default_path_if_unset(current: Option<&std::ffi::OsStr>) -> Option<&'static str> {
     match current {
         Some(p) if !p.is_empty() => None,
-        _ => Some("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
+        _ => Some("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/boot/bin"),
     }
 }
 
@@ -489,6 +489,17 @@ mod tests {
         assert!(default_path_if_unset(Some(OsStr::new(""))).is_some());
         // Already populated → leave it alone.
         assert!(default_path_if_unset(Some(OsStr::new("/custom/bin"))).is_none());
+    }
+
+    #[test]
+    fn default_path_includes_boot_bin() {
+        // Unset/empty PATH gets a default that includes /boot/bin (so the
+        // supervised containerd finds its shim + runc there).
+        let p = default_path_if_unset(None).unwrap();
+        assert!(p.ends_with("/boot/bin"), "{p}");
+        assert!(p.contains(":/sbin:"), "keeps the standard dirs: {p}");
+        // A non-empty PATH is left alone.
+        assert!(default_path_if_unset(Some(std::ffi::OsStr::new("/x"))).is_none());
     }
 
     #[test]

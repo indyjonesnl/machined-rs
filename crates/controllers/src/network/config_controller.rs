@@ -136,6 +136,21 @@ impl Controller for NetworkConfigController {
             }
         }
 
+        // Always bring loopback up: 127.0.0.1 must be bindable for localhost
+        // services (containerd's CRI streaming server binds 127.0.0.1). The kernel
+        // auto-assigns 127.0.0.1/8 to lo; it only needs admin-up. An explicit `lo`
+        // in config wins (no implicit override).
+        if !net.interfaces.iter().any(|i| i.name == "lo") {
+            links.push(obj(
+                "lo",
+                Resource::LinkSpec(LinkSpec {
+                    name: "lo".into(),
+                    up: true,
+                    mtu: None,
+                }),
+            ));
+        }
+
         // Hostname comes from machine.hostname (not the network block).
         let mut hostnames = Vec::new();
         if let Some(h) = self.provider.hostname() {
@@ -205,6 +220,95 @@ mod tests {
         })
     }
 
+    fn provider_no_ifaces() -> Provider {
+        Provider::new(MachineConfig {
+            machine: MachineSection {
+                hostname: Some("node-1".into()),
+                sysctls: vec![],
+                services: vec![],
+                network: NetworkSection {
+                    interfaces: vec![],
+                    nameservers: vec![],
+                    search: vec![],
+                },
+                install: None,
+                time: Default::default(),
+                runtime: Default::default(),
+            },
+        })
+    }
+
+    fn provider_with_explicit_lo_down() -> Provider {
+        Provider::new(MachineConfig {
+            machine: MachineSection {
+                hostname: Some("node-1".into()),
+                sysctls: vec![],
+                services: vec![],
+                network: NetworkSection {
+                    interfaces: vec![InterfaceConfig {
+                        name: "lo".into(),
+                        up: false,
+                        mtu: None,
+                        addresses: vec![],
+                        routes: vec![],
+                    }],
+                    nameservers: vec![],
+                    search: vec![],
+                },
+                install: None,
+                time: Default::default(),
+                runtime: Default::default(),
+            },
+        })
+    }
+
+    #[tokio::test]
+    async fn always_emits_loopback_up() {
+        // Even with NO configured interfaces, lo must be brought up (127.0.0.1
+        // must be bindable for localhost services like containerd's CRI server).
+        let state = State::new();
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
+        let mut c = NetworkConfigController::new(provider_no_ifaces());
+        c.reconcile(&ctx).await.unwrap();
+
+        let lo = state
+            .get(&Key::new(NS, ResourceType::LinkSpec, "lo"))
+            .expect("lo LinkSpec emitted");
+        match lo.spec {
+            Resource::LinkSpec(s) => {
+                assert_eq!(s.name, "lo");
+                assert!(s.up);
+                assert_eq!(s.mtu, None);
+            }
+            _ => panic!("wrong type"),
+        }
+        assert_eq!(lo.metadata.owner.as_deref(), Some("network-config"));
+    }
+
+    #[tokio::test]
+    async fn explicit_loopback_config_is_not_duplicated() {
+        // If the operator explicitly configures lo, that wins — no implicit override.
+        let state = State::new();
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
+        let mut c = NetworkConfigController::new(provider_with_explicit_lo_down());
+        c.reconcile(&ctx).await.unwrap();
+        // exactly one lo LinkSpec, and it's the explicit one (up:false).
+        let los: Vec<_> = state
+            .list(NS, ResourceType::LinkSpec)
+            .into_iter()
+            .filter(|o| matches!(&o.spec, Resource::LinkSpec(s) if s.name == "lo"))
+            .collect();
+        assert_eq!(los.len(), 1, "no duplicate lo");
+        match &los[0].spec {
+            Resource::LinkSpec(s) => assert!(!s.up, "explicit lo:down wins"),
+            _ => unreachable!(),
+        }
+    }
+
     #[tokio::test]
     async fn produces_specs_from_config() {
         let state = State::new();
@@ -214,8 +318,9 @@ mod tests {
         let mut c = NetworkConfigController::new(provider());
         c.reconcile(&ctx).await.unwrap();
 
-        // One link, one valid address (bad-addr skipped), one route, hostname, resolver.
-        assert_eq!(state.list(NS, ResourceType::LinkSpec).len(), 1);
+        // Two links (eth0 + the implicit lo), one valid address (bad-addr
+        // skipped), one route, hostname, resolver.
+        assert_eq!(state.list(NS, ResourceType::LinkSpec).len(), 2);
         assert_eq!(state.list(NS, ResourceType::AddressSpec).len(), 1);
         assert_eq!(state.list(NS, ResourceType::RouteSpec).len(), 1);
         assert_eq!(state.list(NS, ResourceType::HostnameSpec).len(), 1);
@@ -246,12 +351,19 @@ mod tests {
         };
         let mut c = NetworkConfigController::new(provider());
         c.reconcile(&ctx).await.unwrap();
-        assert_eq!(state.list(NS, ResourceType::LinkSpec).len(), 1);
+        // eth0 + the implicit lo.
+        assert_eq!(state.list(NS, ResourceType::LinkSpec).len(), 2);
 
-        // Reconcile with empty config → specs GC'd (no finalizers yet).
+        // Reconcile with empty config → specs GC'd (no finalizers yet). The
+        // implicit lo always survives (1 link); eth0's address is gone.
         let mut empty = NetworkConfigController::new(Provider::new(MachineConfig::default()));
         empty.reconcile(&ctx).await.unwrap();
-        assert_eq!(state.list(NS, ResourceType::LinkSpec).len(), 0);
+        let links = state.list(NS, ResourceType::LinkSpec);
+        assert_eq!(links.len(), 1);
+        match &links[0].spec {
+            Resource::LinkSpec(s) => assert_eq!(s.name, "lo"),
+            _ => panic!("wrong type"),
+        }
         assert_eq!(state.list(NS, ResourceType::AddressSpec).len(), 0);
     }
 

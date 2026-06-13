@@ -20,11 +20,32 @@ pub fn containerd_service(rt: &RuntimeSection) -> ServiceConfig {
     }
 }
 
-/// Minimal CRI-enabled containerd config.
+/// Generate a functional containerd 2.x CRI config (schema version 3). Enables
+/// the CRI runtime plugin (built-in + enabled by default in the upstream static
+/// tarball), the runc runtime via the v2 shim with the cgroupfs driver (no
+/// systemd on this node), and an explicit runc path on the boot partition.
+/// `root` is persistent (EPHEMERAL → /var); `state` is volatile (/run tmpfs).
 pub fn containerd_config_toml(rt: &RuntimeSection) -> String {
     format!(
-        "version = 2\n[grpc]\n  address = \"{}\"\n[plugins.\"io.containerd.grpc.v1.cri\"]\n",
-        rt.socket
+        r#"version = 3
+root = "/var/lib/containerd"
+state = "/run/containerd"
+
+[grpc]
+  address = "{socket}"
+
+[plugins.'io.containerd.cri.v1.runtime']
+  [plugins.'io.containerd.cri.v1.runtime'.containerd]
+    default_runtime_name = "runc"
+
+    [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc]
+      runtime_type = "io.containerd.runc.v2"
+
+      [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
+        SystemdCgroup = false
+        BinaryName = "/boot/bin/runc"
+"#,
+        socket = rt.socket
     )
 }
 
@@ -90,6 +111,47 @@ mod tests {
         );
         assert_eq!(off.len(), 1);
         assert_eq!(off[0].id, "payload");
+    }
+
+    #[test]
+    fn containerd_config_is_v3_cri_with_runc_cgroupfs() {
+        let rt = RuntimeSection {
+            socket: "/run/containerd/containerd.sock".into(),
+            ..Default::default()
+        };
+        let toml_str = containerd_config_toml(&rt);
+        // Parses as valid TOML.
+        let parsed: toml::Value = toml::from_str(&toml_str).expect("valid TOML");
+        assert_eq!(parsed.get("version").and_then(|v| v.as_integer()), Some(3));
+        // The 2.x CRI runtime plugin key is present.
+        assert!(
+            toml_str.contains("io.containerd.cri.v1.runtime"),
+            "{toml_str}"
+        );
+        // runc runtime via the v2 shim, cgroupfs driver, explicit runc path.
+        assert!(
+            toml_str.contains("runtime_type = \"io.containerd.runc.v2\""),
+            "{toml_str}"
+        );
+        assert!(toml_str.contains("SystemdCgroup = false"), "{toml_str}");
+        assert!(
+            toml_str.contains("BinaryName = \"/boot/bin/runc\""),
+            "{toml_str}"
+        );
+        // root/state dirs set.
+        assert!(
+            toml_str.contains("root = \"/var/lib/containerd\""),
+            "{toml_str}"
+        );
+        assert!(
+            toml_str.contains("state = \"/run/containerd\""),
+            "{toml_str}"
+        );
+        // socket threaded through.
+        assert!(
+            toml_str.contains("address = \"/run/containerd/containerd.sock\""),
+            "{toml_str}"
+        );
     }
 
     #[test]

@@ -12,4 +12,5 @@ machine:
     disk: /dev/vda
     wipe: false        # the image flow NEVER wipes; CompleteLayout adopts it
   runtime:
-    disabled: true     # no containerd until M7b
+    disabled: false
+    binary: /boot/bin/containerd

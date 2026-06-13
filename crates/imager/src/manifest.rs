@@ -16,8 +16,12 @@ pub struct Artifact {
     pub name: String,
     pub url: String,
     pub sha256: String,
-    /// "apk" (extracted into the initramfs rootfs) — the only kind in M7a.
+    /// "apk" → initramfs rootfs; "boot-tarball" → /boot/bin (bin/* from a
+    /// single .tar.gz); "boot-binary" → /boot/bin/<rename|name>.
     pub kind: String,
+    /// For "boot-binary": the filename to stage as (e.g. runc). Ignored otherwise.
+    #[serde(default)]
+    pub rename: Option<String>,
 }
 
 impl Manifest {
@@ -56,5 +60,21 @@ kind = "apk"
         assert_eq!(arts.len(), 1);
         assert_eq!(arts[0].name, "linux-virt");
         assert!(m.for_arch("riscv").is_none());
+    }
+
+    #[test]
+    fn real_artifacts_manifest_parses() {
+        // The committed manifest must always parse, and carry the M7b-2 boot binaries.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("artifacts.toml");
+        let m = Manifest::load(&path).expect("artifacts.toml parses");
+        let x86 = m.for_arch("x86_64").expect("x86_64 arch present");
+        assert!(x86
+            .iter()
+            .any(|a| a.name == "containerd" && a.kind == "boot-tarball"));
+        assert!(x86.iter().any(|a| a.name == "runc"
+            && a.kind == "boot-binary"
+            && a.rename.as_deref() == Some("runc")));
+        // The apk artifacts (kernel etc.) are still there.
+        assert!(x86.iter().any(|a| a.kind == "apk"));
     }
 }

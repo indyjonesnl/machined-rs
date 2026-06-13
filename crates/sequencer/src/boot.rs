@@ -68,7 +68,7 @@ impl Task for StartServices {
     async fn run(&self, ctx: &SequencerCtx) -> crate::task::Result<()> {
         let rt = ctx.provider.runtime();
         if !rt.disabled {
-            // Best-effort: write the minimal containerd config if absent.
+            // Best-effort: write the containerd config if absent.
             let path = std::path::Path::new(&rt.config_path);
             if !path.exists() {
                 if let Some(dir) = path.parent() {
