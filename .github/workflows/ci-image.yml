@@ -1,0 +1,36 @@
+name: ci-image
+# Builds and publishes the CI tool image (Rust + musl target + QEMU) that the
+# boot-test job in ci.yml runs inside. Rebuilt when the Dockerfile changes and
+# weekly so base-image security updates land without manual intervention.
+on:
+  push:
+    branches: [main]
+    paths:
+      - ci/Dockerfile
+      - .github/workflows/ci-image.yml
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC — base-image security updates
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ci
+          file: ci/Dockerfile
+          push: true
+          tags: ghcr.io/indyjonesnl/machined-ci:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
