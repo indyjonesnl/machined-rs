@@ -62,11 +62,20 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
     );
     let scratch = tempfile::tempdir().context("creating scratch dir")?;
     let rootfs = scratch.path().join("rootfs");
+    let staging = scratch.path().join("staging");
+    let staging_bin = staging.join("bin");
+    std::fs::create_dir_all(&staging)
+        .with_context(|| format!("creating staging dir {}", staging.display()))?;
     for a in arts {
         println!("fetching {} ({})", a.name, a.url);
         let path = crate::fetch::fetch_verified(fetcher, &a.url, &a.sha256, o.cache)?;
         match a.kind.as_str() {
             "apk" => apk::extract_apk(&path, &rootfs)?,
+            "boot-tarball" => crate::boot::extract_boot_tarball(&path, &staging_bin)?,
+            "boot-binary" => {
+                let name = a.rename.clone().unwrap_or_else(|| a.name.clone());
+                crate::boot::copy_boot_binary(&path, &staging_bin, &name)?;
+            }
             k => anyhow::bail!("unknown artifact kind {k} for {}", a.name),
         }
     }
@@ -86,10 +95,8 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
     prune_for_initramfs(&rootfs, &kver, &mods)?;
     let initrd = initramfs::build_initramfs(&rootfs, o.machined, &mods, &kver)?;
 
-    // 5. Stage the FAT tree and write the image.
-    let staging = scratch.path().join("staging");
-    std::fs::create_dir_all(&staging)
-        .with_context(|| format!("creating staging dir {}", staging.display()))?;
+    // 5. Stage the FAT tree and write the image. (staging/ and staging/bin were
+    // created before the fetch loop so boot artifacts could land in /boot/bin.)
     let vmlinuz = staging.join("vmlinuz");
     std::fs::write(&vmlinuz, &kernel_bytes)
         .with_context(|| format!("writing {}", vmlinuz.display()))?;
@@ -297,6 +304,19 @@ kernel/fs/nls/nls_utf8.ko.gz:
         gzip(&tar_bytes)
     }
 
+    /// containerd static tarball: `bin/containerd` (plus a non-bin entry that
+    /// must be ignored), gzipped — the shape extract_boot_tarball expects.
+    fn containerd_tgz() -> Vec<u8> {
+        let mut tar_bytes = Vec::new();
+        {
+            let mut b = tar::Builder::new(&mut tar_bytes);
+            append_file(&mut b, "bin/containerd", 0o755, b"ELF-c");
+            append_file(&mut b, "LICENSE", 0o644, b"license");
+            b.finish().unwrap();
+        }
+        gzip(&tar_bytes)
+    }
+
     struct Fixture {
         _dir: tempfile::TempDir,
         manifest: PathBuf,
@@ -317,14 +337,22 @@ kernel/fs/nls/nls_utf8.ko.gz:
 
         let linux = linux_virt_apk();
         let e2fs = e2fsprogs_apk();
+        let containerd = containerd_tgz();
+        let runc = b"ELF-runc".to_vec();
         let linux_sha = hex::encode(Sha256::digest(&linux));
         let e2fs_sha = hex::encode(Sha256::digest(&e2fs));
+        let containerd_sha = hex::encode(Sha256::digest(&containerd));
+        let runc_sha = hex::encode(Sha256::digest(&runc));
 
         let linux_url = "http://example/linux-virt.apk".to_string();
         let e2fs_url = "http://example/e2fsprogs.apk".to_string();
+        let containerd_url = "http://example/containerd.tar.gz".to_string();
+        let runc_url = "http://example/runc.amd64".to_string();
         let mut map = BTreeMap::new();
         map.insert(linux_url.clone(), linux);
         map.insert(e2fs_url.clone(), e2fs);
+        map.insert(containerd_url.clone(), containerd);
+        map.insert(runc_url.clone(), runc);
 
         let pinned_linux_sha = linux_sha_override.unwrap_or(&linux_sha);
         let manifest = base.join("artifacts.toml");
@@ -343,6 +371,19 @@ name = "e2fsprogs"
 url = "{e2fs_url}"
 sha256 = "{e2fs_sha}"
 kind = "apk"
+
+[[artifact.x86_64]]
+name = "containerd"
+url = "{containerd_url}"
+sha256 = "{containerd_sha}"
+kind = "boot-tarball"
+
+[[artifact.x86_64]]
+name = "runc"
+url = "{runc_url}"
+sha256 = "{runc_sha}"
+kind = "boot-binary"
+rename = "runc"
 "#
             ),
         )
@@ -453,6 +494,27 @@ kind = "apk"
             let p = format!("pki/{f4}");
             assert!(!read_fat_file(&fs, &p).is_empty(), "pki file {f4} empty");
         }
+
+        // Boot binaries: the containerd tarball's bin/* and the renamed runc
+        // land in the FAT's /bin (boot-tarball + boot-binary kinds), with the
+        // tarball's non-bin entries skipped.
+        let bin = fs.root_dir().open_dir("bin").expect("bin dir on FAT");
+        let bin_names: Vec<String> = bin
+            .iter()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n != "." && n != "..")
+            .collect();
+        assert!(
+            bin_names.contains(&"containerd".to_string()),
+            "{bin_names:?}"
+        );
+        assert!(bin_names.contains(&"runc".to_string()), "{bin_names:?}");
+        assert!(
+            !bin_names.contains(&"LICENSE".to_string()),
+            "non-bin tarball entries must be skipped: {bin_names:?}"
+        );
+        assert_eq!(read_fat_file(&fs, "bin/containerd"), b"ELF-c");
+        assert_eq!(read_fat_file(&fs, "bin/runc"), b"ELF-runc");
 
         // initramfs.img gunzips to a cpio with the expected payload.
         let initrd = gunzip(&read_fat_file(&fs, "initramfs.img"));

@@ -16,8 +16,12 @@ pub struct Artifact {
     pub name: String,
     pub url: String,
     pub sha256: String,
-    /// "apk" (extracted into the initramfs rootfs) — the only kind in M7a.
+    /// "apk" → initramfs rootfs; "boot-tarball" → /boot/bin (bin/* from a
+    /// single .tar.gz); "boot-binary" → /boot/bin/<rename|name>.
     pub kind: String,
+    /// For "boot-binary": the filename to stage as (e.g. runc). Ignored otherwise.
+    #[serde(default)]
+    pub rename: Option<String>,
 }
 
 impl Manifest {

@@ -31,7 +31,6 @@ fn set_exec(path: &Path) -> anyhow::Result<()> {
 ///
 /// # Errors
 /// Fails on I/O errors or an entry whose path escapes containment (`..`/absolute).
-#[allow(dead_code)] // wired in Task 2
 pub fn extract_boot_tarball(tgz: &Path, staging_bin: &Path) -> anyhow::Result<()> {
     let file = std::fs::File::open(tgz).with_context(|| format!("opening {}", tgz.display()))?;
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
@@ -66,7 +65,6 @@ pub fn extract_boot_tarball(tgz: &Path, staging_bin: &Path) -> anyhow::Result<()
 ///
 /// # Errors
 /// Fails on I/O errors.
-#[allow(dead_code)] // wired in Task 2
 pub fn copy_boot_binary(src: &Path, staging_bin: &Path, name: &str) -> anyhow::Result<()> {
     std::fs::create_dir_all(staging_bin)
         .with_context(|| format!("create {}", staging_bin.display()))?;
