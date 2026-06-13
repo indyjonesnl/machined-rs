@@ -1,4 +1,4 @@
-.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 boot-test
+.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 dist-aarch64 boot-test boot-test-aarch64
 
 pre-commit: fmt clippy test
 
@@ -34,7 +34,26 @@ dist-x86_64:
 		cargo build --release --target x86_64-unknown-linux-musl -p machined; \
 	fi
 
+# Static machined for aarch64 images (cross-linked with the gnu aarch64 gcc;
+# rustc supplies the musl libc, so no musl sysroot needed — ring builds with
+# aarch64-linux-gnu-gcc as CC).
+dist-aarch64:
+	@if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then \
+		CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc \
+		CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc \
+		AR_aarch64_unknown_linux_musl=aarch64-linux-gnu-ar \
+		cargo build --release --target aarch64-unknown-linux-musl -p machined; \
+	else \
+		echo "FATAL: aarch64-linux-gnu-gcc not found (apt install gcc-aarch64-linux-gnu)"; \
+		exit 1; \
+	fi
+
 # Build the x86_64 image + boot it in QEMU, assert the node comes up.
 boot-test: dist-x86_64
 	cargo build --release -p machined-imager -p machinectl
 	./scripts/boot-test-x86_64.sh
+
+# Build the aarch64 image + boot it in qemu-system-aarch64 (TCG), assert the node comes up.
+boot-test-aarch64: dist-aarch64
+	cargo build --release -p machined-imager -p machinectl
+	./scripts/boot-test-aarch64.sh

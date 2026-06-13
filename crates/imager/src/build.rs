@@ -85,7 +85,7 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
     let dep_path = rootfs.join("lib/modules").join(&kver).join("modules.dep");
     let dep = std::fs::read_to_string(&dep_path)
         .with_context(|| format!("reading {}", dep_path.display()))?;
-    let mods = modules::resolve_closure(&dep, modules::X86_64_QEMU_MODULES)?;
+    let mods = modules::resolve_closure(&dep, modules::VIRT_MODULES)?;
     let kernel = rootfs.join("boot/vmlinuz-virt");
     anyhow::ensure!(kernel.exists(), "kernel missing from linux-virt apk");
     let kernel_bytes =
@@ -232,7 +232,7 @@ mod tests {
 
     const KVER: &str = "6.12.81-0-virt";
 
-    /// modules.dep for the QEMU closure: every X86_64_QEMU_MODULES root and its
+    /// modules.dep for the QEMU closure: every VIRT_MODULES root and its
     /// transitive deps. nls_cp437/nls_iso8859_1/nls_utf8 are dep-less roots.
     const MODULES_DEP: &str = "\
 kernel/drivers/block/virtio_blk.ko.gz: kernel/drivers/virtio/virtio.ko.gz

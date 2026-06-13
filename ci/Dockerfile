@@ -11,14 +11,31 @@
 FROM rust:1-bookworm
 
 LABEL org.opencontainers.image.source=https://github.com/indyjonesnl/machined-rs
-LABEL org.opencontainers.image.description="machined-rs CI: Rust + x86_64-musl target + QEMU for the boot-test job"
+LABEL org.opencontainers.image.description="machined-rs CI: Rust + x86_64/aarch64-musl targets + QEMU (x86_64 + aarch64) for the boot-test job"
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       qemu-system-x86 \
+      qemu-system-arm \
+      qemu-efi-aarch64 \
       musl-tools \
+      gcc-aarch64-linux-gnu \
+      libc6-dev-arm64-cross \
       make \
  && rm -rf /var/lib/apt/lists/*
+
+# qemu-efi-aarch64 provides the AAVMF/edk2 UEFI firmware (QEMU_EFI.fd). aarch64's
+# Alpine vmlinuz-virt is an EFI-stub PE kernel — unlike x86's self-decompressing
+# bzImage, qemu's bare `-kernel` on `-M virt` can't boot it; the boot test passes
+# `-bios QEMU_EFI.fd` so the firmware loads the kernel+initrd from fw_cfg via the
+# EFI stub. (No persistent EFI vars needed for direct kernel boot.)
+
+# libc6-dev-arm64-cross provides the aarch64 glibc dev headers/sysroot under
+# /usr/aarch64-linux-gnu/include. Without it (and with --no-install-recommends),
+# aarch64-linux-gnu-gcc falls back to the host /usr/include and ring's C build
+# dies on "bits/libc-header-start.h: No such file or directory". ring only uses
+# stdint/stdlib basics, so the glibc aarch64 headers are fine even though rustc
+# links the musl libc for the aarch64-unknown-linux-musl target.
 
 # The repo's rust-toolchain.toml pins `channel = "stable"`, so rustup selects
 # the `stable` alias inside the checkout — install THAT toolchain (not just the
@@ -27,9 +44,13 @@ RUN apt-get update \
 RUN rustup toolchain install stable --profile minimal \
       --component rustfmt --component clippy \
       --target x86_64-unknown-linux-musl \
+      --target aarch64-unknown-linux-musl \
  && rustup default stable
 
 # Sanity: fail the image build if any tool the boot-test relies on is missing.
 RUN qemu-system-x86_64 --version \
+ && qemu-system-aarch64 --version \
  && musl-gcc --version \
- && rustup target list --installed | grep -qx x86_64-unknown-linux-musl
+ && aarch64-linux-gnu-gcc --version \
+ && rustup target list --installed | grep -qx x86_64-unknown-linux-musl \
+ && rustup target list --installed | grep -qx aarch64-unknown-linux-musl
