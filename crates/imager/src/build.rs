@@ -602,6 +602,16 @@ rename = "runc"
             .expect("examples/node-ci.yaml must parse against the config schema");
     }
 
+    /// The shipped Pi example must always parse against the live config schema:
+    /// this pins examples/node-pi.yaml (no install, no network, runtime enabled)
+    /// against config-schema drift forever.
+    #[test]
+    fn pi_example_config_parses() {
+        let yaml = include_str!("../../../examples/node-pi.yaml");
+        machined_config::load_from_str(yaml)
+            .expect("examples/node-pi.yaml must parse against the config schema");
+    }
+
     #[test]
     fn checksum_mismatch_aborts() {
         let wrong = "00".repeat(32);
