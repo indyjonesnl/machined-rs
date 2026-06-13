@@ -32,5 +32,3 @@ jobs:
           file: ci/Dockerfile
           push: true
           tags: ghcr.io/indyjonesnl/machined-ci:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
