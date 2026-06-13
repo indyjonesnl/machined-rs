@@ -121,7 +121,8 @@ grace-expired service kill is observable in the API rather than silent.
 | Graceful stop: SIGTERM→grace→kill (process groups), sync+unmount | ✅ |
 | Reset: wipe STATE+EPHEMERAL → reboot → reprovision | ✅ |
 | Bootable disk image + QEMU-verified boot (x86_64) | ✅ |
-| ARM/Pi image, upgrade/kexec | 🔜 next |
+| [aarch64 / Raspberry Pi 3A+ image (build + manual-verify)](docs/raspberry-pi-3a-plus.md) | ✅ |
+| upgrade/kexec | 🔜 next |
 | Streaming logs/events RPCs, per-service health probes | 🔜 planned |
 
 There is an image now: `machined-imager` builds a bootable x86_64 disk image
@@ -139,6 +140,7 @@ cargo build --workspace
 make pre-commit     # fmt + clippy -D warnings + full test suite (root-free)
 make root-tests     # privileged tier: loop devices, netns, clock, real containerd
 make boot-test      # build the x86_64 image + boot it in QEMU; asserts API + provisioning
+make build-image-aarch64-rpi   # build the Pi 3A+ SD image (no boot; verify on hardware — see docs/raspberry-pi-3a-plus.md)
 ```
 
 No system `protoc` needed — protobuf codegen uses a vendored binary.
