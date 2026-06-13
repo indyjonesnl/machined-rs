@@ -65,9 +65,10 @@ pub fn resolve_closure(modules_dep: &str, roots: &[&str]) -> anyhow::Result<Vec<
     Ok(out)
 }
 
-/// The module roots an x86_64 QEMU/virtio boot needs (Alpine linux-virt builds
-/// these =m): block + net + the three filesystems machined mounts.
-pub const X86_64_QEMU_MODULES: &[&str] = &[
+/// The module roots a qemu `-M virt` (virtio) boot needs — shared by x86_64 and
+/// aarch64 (both use virtio-pci; these are all `=m` in Alpine linux-virt). Block
+/// + net + the filesystems machined mounts.
+pub const VIRT_MODULES: &[&str] = &[
     "virtio_blk",
     "virtio_net",
     "ext4",
