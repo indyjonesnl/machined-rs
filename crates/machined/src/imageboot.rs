@@ -125,8 +125,22 @@ pub fn seed_pki(src: &Path, dst: &Path) -> anyhow::Result<()> {
         let mode = if f.ends_with(".key") { 0o600 } else { 0o644 };
         std::fs::set_permissions(tmp.join(f), std::fs::Permissions::from_mode(mode))?;
     }
+    // fsync each staged file before the rename: ext4's auto_da_alloc heuristic
+    // does NOT cover rename-to-a-new-path, so without this a power cut just
+    // after the rename could leave a present dst dir shadowing zero-length keys
+    // — which load_or_generate would then read as a partial PKI (PkiError) and
+    // disable the API forever.
+    for f in FILES {
+        std::fs::File::open(tmp.join(f))
+            .and_then(|fh| fh.sync_all())
+            .with_context(|| format!("fsync {f}"))?;
+    }
     std::fs::rename(&tmp, dst)
         .with_context(|| format!("rename {} -> {}", tmp.display(), dst.display()))?;
+    // Persist the rename itself by syncing the parent directory.
+    if let Some(parent) = dst.parent() {
+        let _ = std::fs::File::open(parent).and_then(|d| d.sync_all());
+    }
     info!("seeded PKI from {}", src.display());
     Ok(())
 }
@@ -294,6 +308,18 @@ mod tests {
             !dst.with_extension("tmp").exists(),
             "staging dir renamed away"
         );
+
+        // Each seeded file is non-empty and matches the source (the fsync path must
+        // not truncate or drop content).
+        for f in ["ca.pem", "ca.key", "server.pem", "server.key"] {
+            let got = std::fs::read(dst.join(f)).unwrap();
+            assert!(!got.is_empty(), "{f} empty after seed");
+            assert_eq!(
+                got,
+                std::fs::read(src.join(f)).unwrap(),
+                "{f} content mismatch"
+            );
+        }
 
         // Second call must NEVER overwrite an existing dst.
         std::fs::write(src.join("ca.pem"), "EVIL").unwrap();
