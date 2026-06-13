@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use machined_block::BlockBackend;
 use machined_platform::{MountSpec, Platform};
+use machined_resources::{Resource, ResourceType};
+use machined_runtime_core::State;
 use tracing::{info, warn};
 
 pub const MODULES_LOAD: &str = "/etc/machined/modules.load";
@@ -127,6 +129,36 @@ pub fn seed_pki(src: &Path, dst: &Path) -> anyhow::Result<()> {
         .with_context(|| format!("rename {} -> {}", tmp.display(), dst.display()))?;
     info!("seeded PKI from {}", src.display());
     Ok(())
+}
+
+/// True iff a `MountStatus` for the STATE volume reports it mounted.
+// Wired into main.rs's PKI seed/load gate in the follow-up task; `pub` is no
+// dead-code shield in a bin crate, so allow it until the caller lands.
+#[allow(dead_code)]
+fn state_mounted(state: &State) -> bool {
+    state
+        .list("block", ResourceType::MountStatus)
+        .into_iter()
+        .any(|o| matches!(o.spec, Resource::MountStatus(m) if m.volume == "STATE" && m.mounted))
+}
+
+/// Block until the STATE volume is mounted (the controller runtime provisions
+/// then mounts it), polling at the same 200ms cadence as the supervisor's
+/// dep-gate. Returns false on timeout. Callers gate PKI seed/load on this so
+/// PKI lands on the persistent ext4 STATE, not the initramfs rootfs it would
+/// otherwise be shadowed on.
+#[allow(dead_code)]
+pub async fn wait_for_state_mount(state: &State, timeout: std::time::Duration) -> bool {
+    let start = tokio::time::Instant::now();
+    loop {
+        if state_mounted(state) {
+            return true;
+        }
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
 }
 
 /// The boot partition's config wins when it exists.
@@ -302,5 +334,74 @@ mod tests {
         // boot exists -> boot.
         std::fs::write(&boot, "x").unwrap();
         assert_eq!(pick_config_path(&boot, &fallback), boot);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_returns_true_when_state_mounted() {
+        use machined_resources::{MountStatus, Resource, ResourceObject};
+        use machined_runtime_core::State;
+        let state = State::new();
+        state
+            .create(ResourceObject::new(
+                "block",
+                "STATE",
+                Resource::MountStatus(MountStatus {
+                    volume: "STATE".into(),
+                    source: "/dev/vda2".into(),
+                    target: "/system/state".into(),
+                    fstype: "ext4".into(),
+                    mounted: true,
+                }),
+            ))
+            .unwrap();
+        assert!(wait_for_state_mount(&state, std::time::Duration::from_secs(60)).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_times_out_when_state_absent_or_other_volume() {
+        use machined_resources::{MountStatus, Resource, ResourceObject};
+        use machined_runtime_core::State;
+        let state = State::new();
+        // An EPHEMERAL mount must NOT satisfy the STATE wait.
+        state
+            .create(ResourceObject::new(
+                "block",
+                "EPHEMERAL",
+                Resource::MountStatus(MountStatus {
+                    volume: "EPHEMERAL".into(),
+                    source: "/dev/vda3".into(),
+                    target: "/var".into(),
+                    fstype: "ext4".into(),
+                    mounted: true,
+                }),
+            ))
+            .unwrap();
+        assert!(!wait_for_state_mount(&state, std::time::Duration::from_secs(60)).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_unblocks_when_state_appears_mid_wait() {
+        use machined_resources::{MountStatus, Resource, ResourceObject};
+        use machined_runtime_core::State;
+        let state = State::new();
+        let s2 = state.clone();
+        let waiter = tokio::spawn(async move {
+            wait_for_state_mount(&s2, std::time::Duration::from_secs(60)).await
+        });
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        state
+            .create(ResourceObject::new(
+                "block",
+                "STATE",
+                Resource::MountStatus(MountStatus {
+                    volume: "STATE".into(),
+                    source: "/dev/vda2".into(),
+                    target: "/system/state".into(),
+                    fstype: "ext4".into(),
+                    mounted: true,
+                }),
+            ))
+            .unwrap();
+        assert!(waiter.await.unwrap());
     }
 }
