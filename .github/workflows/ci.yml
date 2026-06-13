@@ -26,20 +26,23 @@ jobs:
     runs-on: ubuntu-latest
     needs: check
     timeout-minutes: 45
+    # Runs inside the prebuilt CI tool image (Rust + musl target + QEMU +
+    # musl-tools) published by ci-image.yml — no per-run toolchain/apt installs.
+    # `--device /dev/kvm` passes the runner's KVM node through so QEMU keeps
+    # hardware acceleration (container-root opens the 0660 root:kvm node via
+    # CAP_DAC_OVERRIDE — validated locally; without it QEMU falls back to TCG).
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/indyjonesnl/machined-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --device /dev/kvm
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
-      - name: install qemu + musl
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 musl-tools
-          # KVM is enabled on GitHub-hosted Linux runners; make it accessible.
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
       - name: cache imager artifacts
         uses: actions/cache@v4
         with:
