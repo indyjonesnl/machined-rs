@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod apk;
+mod boot;
 mod build;
 mod cpio;
 mod fetch;
