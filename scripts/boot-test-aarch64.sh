@@ -43,7 +43,12 @@ echo "image:     $IMG ($(du -h "$IMG" | cut -f1))"
 echo "vmlinuz:   $WORK/boot/vmlinuz ($(du -h "$WORK/boot/vmlinuz" | cut -f1))"
 echo "initramfs: $WORK/boot/initramfs.img ($(du -h "$WORK/boot/initramfs.img" | cut -f1))"
 
-qemu-system-aarch64 -machine virt -cpu max -smp 2 -m 512 \
+# cortex-a53 = the Pi 3A+ core; far faster under TCG than -cpu max (which emulates
+# SVE etc.). -bios QEMU_EFI.fd: the Alpine aarch64 vmlinuz is an EFI-stub kernel
+# that needs UEFI firmware to boot (qemu's bare -kernel on -M virt can't, unlike
+# x86's bzImage). edk2 loads kernel+initrd from fw_cfg via the EFI stub.
+qemu-system-aarch64 -machine virt -cpu cortex-a53 -smp 2 -m 512 \
+  -bios /usr/share/qemu-efi-aarch64/QEMU_EFI.fd \
   -kernel "$WORK/boot/vmlinuz" -initrd "$WORK/boot/initramfs.img" \
   -append "console=ttyAMA0" \
   -drive file="$IMG",if=virtio,format=raw \

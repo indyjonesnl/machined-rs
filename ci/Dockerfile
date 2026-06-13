@@ -17,11 +17,18 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       qemu-system-x86 \
       qemu-system-arm \
+      qemu-efi-aarch64 \
       musl-tools \
       gcc-aarch64-linux-gnu \
       libc6-dev-arm64-cross \
       make \
  && rm -rf /var/lib/apt/lists/*
+
+# qemu-efi-aarch64 provides the AAVMF/edk2 UEFI firmware (QEMU_EFI.fd). aarch64's
+# Alpine vmlinuz-virt is an EFI-stub PE kernel — unlike x86's self-decompressing
+# bzImage, qemu's bare `-kernel` on `-M virt` can't boot it; the boot test passes
+# `-bios QEMU_EFI.fd` so the firmware loads the kernel+initrd from fw_cfg via the
+# EFI stub. (No persistent EFI vars needed for direct kernel boot.)
 
 # libc6-dev-arm64-cross provides the aarch64 glibc dev headers/sysroot under
 # /usr/aarch64-linux-gnu/include. Without it (and with --no-install-recommends),
