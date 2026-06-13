@@ -40,7 +40,9 @@ enum Command {
         #[arg(long, default_value_t = 4 * 1024 * 1024 * 1024)]
         size: u64,
         /// Optional pre-generated PKI dir (ca.pem, ca.key, server.pem, server.key)
-        /// copied to pki/ on the boot partition.
+        /// copied to pki/ on the boot partition. SECURITY: FAT has no unix
+        /// permissions, so ca.key lands world-readable on the image — treat the
+        /// resulting image / SD card as containing private key material.
         #[arg(long)]
         pki_dir: Option<PathBuf>,
         /// Also copy kernel + initramfs to this dir (for QEMU -kernel boot).
