@@ -1,0 +1,15 @@
+# QEMU user-net (slirp) static layout: guest 10.0.2.15/24, gw 10.0.2.2, dns 10.0.2.3.
+machine:
+  hostname: node-ci
+  network:
+    interfaces:
+      - name: eth0
+        addresses: ["10.0.2.15/24"]
+        routes:
+          - via: 10.0.2.2
+    nameservers: [10.0.2.3]
+  install:
+    disk: /dev/vda
+    wipe: false        # the image flow NEVER wipes; CompleteLayout adopts it
+  runtime:
+    disabled: true     # no containerd until M7b

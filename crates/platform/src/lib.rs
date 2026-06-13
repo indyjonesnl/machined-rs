@@ -24,6 +24,13 @@ pub enum PlatformError {
 
 pub type Result<T> = std::result::Result<T, PlatformError>;
 
+/// Linux MS_* mount-flag bits for `MountSpec.flags`. The real platform maps
+/// these through `nix::mount::MsFlags::from_bits_truncate`, so the values must
+/// match the kernel's (pinned by a test in `linux.rs`).
+pub const MS_RDONLY: u64 = 0x1;
+pub const MS_NOSUID: u64 = 0x2;
+pub const MS_NODEV: u64 = 0x4;
+
 /// A filesystem to mount during early boot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MountSpec {
@@ -52,9 +59,13 @@ pub fn essential_mounts() -> Vec<MountSpec> {
     ]
 }
 
+use std::path::Path;
+
 /// Abstraction over the privileged operations early boot needs.
 pub trait Platform: Send + Sync {
     fn mount(&self, spec: &MountSpec) -> Result<()>;
+    /// Load a kernel module from an absolute `.ko` path. Already-loaded is Ok.
+    fn load_module(&self, path: &Path) -> Result<()>;
     fn set_sysctl(&self, key: &str, value: &str) -> Result<()>;
     fn set_hostname(&self, name: &str) -> Result<()>;
     fn kernel_cmdline(&self) -> Result<String>;
@@ -69,10 +80,20 @@ pub trait Platform: Send + Sync {
     fn reboot(&self) -> Result<()>;
     fn poweroff(&self) -> Result<()>;
 
-    /// Mount every essential pseudo-filesystem. Default impl loops `mount`.
+    /// Mount every essential pseudo-filesystem that isn't already mounted.
+    /// Idempotent: re-running (e.g. the sequencer's MountFilesystems after an
+    /// early image-boot mount) is a no-op for already-present mounts.
+    ///
+    /// An is_mounted error means "unknown → attempt the mount": on a fresh
+    /// kernel (machined as /init) /proc isn't mounted yet, so mountinfo is
+    /// unreadable. The worst case of mounting anyway is a harmless stacked
+    /// pseudo-fs mount — infinitely better than a PID1 that mounts nothing
+    /// and panics the kernel.
     fn mount_essential(&self) -> Result<()> {
         for spec in essential_mounts() {
-            self.mount(&spec)?;
+            if !self.is_mounted(&spec.target).unwrap_or(false) {
+                self.mount(&spec)?;
+            }
         }
         Ok(())
     }

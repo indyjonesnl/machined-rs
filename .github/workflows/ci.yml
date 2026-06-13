@@ -21,3 +21,37 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: test
         run: cargo test --workspace
+
+  boot-test:
+    runs-on: ubuntu-latest
+    needs: check
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: install qemu + musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 musl-tools
+          # KVM is enabled on GitHub-hosted Linux runners; make it accessible.
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: cache imager artifacts
+        uses: actions/cache@v4
+        with:
+          path: target/imager-cache
+          key: imager-artifacts-${{ hashFiles('crates/imager/artifacts.toml') }}
+      - name: boot test
+        timeout-minutes: 35
+        run: make boot-test
+      - name: upload serial log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-test-serial-log
+          path: target/boot-test/serial.log
+          if-no-files-found: ignore

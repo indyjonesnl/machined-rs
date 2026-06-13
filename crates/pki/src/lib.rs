@@ -200,6 +200,21 @@ impl NodePki {
     }
 }
 
+/// Write a client bundle (CA cert + a fresh client cert/key for `cn`) into
+/// `dir`, creating it if needed. The client private key is owner-only (0600);
+/// `ca.pem`/`client.pem` are world-readable certs.
+pub fn write_client_bundle(dir: &Path, pki: &NodePki, cn: &str) -> Result<()> {
+    fs::create_dir_all(dir).map_err(|source| PkiError::Io {
+        path: dir.to_string_lossy().to_string(),
+        source,
+    })?;
+    let client = pki.issue_client(cn)?;
+    write(&dir.join("ca.pem"), &pki.ca_pem())?;
+    write(&dir.join("client.pem"), &client.cert_pem)?;
+    write_key(&dir.join("client.key"), &client.key_pem)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +264,29 @@ mod tests {
         NodePki::load_or_generate(&dir, "node", &["127.0.0.1".into()]).unwrap();
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn write_client_bundle_emits_ca_cert_key() {
+        let dir = std::env::temp_dir().join(format!("mnd-pki-bundle-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        let pki = NodePki::load_or_generate(&dir, "node", &["127.0.0.1".into()]).unwrap();
+        let bundle = dir.join("machinectl");
+        write_client_bundle(&bundle, &pki, "machinectl").unwrap();
+        for f in ["ca.pem", "client.pem", "client.key"] {
+            assert!(bundle.join(f).exists(), "{f}");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(bundle.join("client.key"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "client.key must be 0600");
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 

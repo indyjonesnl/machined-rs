@@ -6,7 +6,9 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use crate::{BlockBackend, BlockProvisioner, DiskInfo, FsType, PartitionPlan, Result, VolumeInfo};
+use crate::{
+    BlockBackend, BlockError, BlockProvisioner, DiskInfo, FsType, PartitionPlan, Result, VolumeInfo,
+};
 
 #[derive(Default)]
 struct FakeState {
@@ -14,6 +16,7 @@ struct FakeState {
     volumes: Vec<VolumeInfo>,
     wipes: Vec<String>,
     creates: Vec<String>,
+    adds: Vec<(String, Vec<String>)>,
     formats: Vec<(String, FsType, String)>,
 }
 
@@ -45,6 +48,11 @@ impl FakeBlockBackend {
     /// Test inspection: disks that had partitions created.
     pub fn creates(&self) -> Vec<String> {
         self.state.lock().unwrap().creates.clone()
+    }
+
+    /// Test inspection: (disk, [appended labels]) of each `add_partitions` call.
+    pub fn adds(&self) -> Vec<(String, Vec<String>)> {
+        self.state.lock().unwrap().adds.clone()
     }
 
     /// Test inspection: (device, fs, label) of each format call.
@@ -102,6 +110,56 @@ impl BlockProvisioner for FakeBlockBackend {
                 device,
                 disk: leaf.clone(),
                 partition_uuid: format!("uuid-{}", i + 1),
+                partition_label: p.label.clone(),
+                partition_type_guid: p.part_type.type_guid().to_string(),
+                fs_type: None,
+                fs_label: None,
+                fs_uuid: None,
+                size_bytes: p.size_bytes,
+            });
+        }
+        Ok(devices)
+    }
+
+    async fn add_partitions(&self, disk: &str, plan: &[PartitionPlan]) -> Result<Vec<String>> {
+        let mut st = self.state.lock().unwrap();
+        let leaf = disk_leaf(disk);
+        // Mirror SysfsBlock: REFUSE duplicate labels before touching anything,
+        // and record only SUCCESSFUL appends (a refused call leaves no trace
+        // in adds() — it wrote nothing).
+        for p in plan {
+            if st
+                .volumes
+                .iter()
+                .any(|v| v.disk == leaf && v.partition_label == p.label)
+            {
+                return Err(BlockError::Gpt {
+                    device: disk.to_string(),
+                    message: format!(
+                        "partition {} already exists on {disk}; refusing to append",
+                        p.label
+                    ),
+                });
+            }
+        }
+        st.adds.push((
+            disk.to_string(),
+            plan.iter().map(|p| p.label.clone()).collect(),
+        ));
+        // The fake doesn't track a separate partition count, so derive the
+        // existing-partition count HONESTLY from the volumes already seeded on
+        // this disk (mirrors how the real impl counts gdisk.partitions() before
+        // appending). New partitions are numbered after that count.
+        let existing = st.volumes.iter().filter(|v| v.disk == leaf).count();
+        let mut devices = Vec::new();
+        for (i, p) in plan.iter().enumerate() {
+            let num = existing + i + 1;
+            let device = part_device(disk, num);
+            devices.push(device.clone());
+            st.volumes.push(VolumeInfo {
+                device,
+                disk: leaf.clone(),
+                partition_uuid: format!("uuid-{num}"),
                 partition_label: p.label.clone(),
                 partition_type_guid: p.part_type.type_guid().to_string(),
                 fs_type: None,
@@ -191,5 +249,69 @@ mod tests {
         be.wipe("/dev/sda").await.unwrap();
         assert!(be.list_volumes().await.unwrap().is_empty());
         assert_eq!(be.wipes(), vec!["/dev/sda".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn add_partitions_numbers_after_existing() {
+        // A flashed image: one existing EFI partition seeded on the disk.
+        let be = FakeBlockBackend::new().with_volume(VolumeInfo {
+            device: "/dev/sda1".into(),
+            disk: "sda".into(),
+            partition_uuid: "u".into(),
+            partition_label: "EFI".into(),
+            partition_type_guid: "g".into(),
+            fs_type: Some(FsType::Vfat),
+            fs_label: None,
+            fs_uuid: None,
+            size_bytes: 512 << 20,
+        });
+        let plan = vec![
+            PartitionPlan {
+                label: "STATE".into(),
+                part_type: PartType::LinuxFilesystem,
+                fs: FsType::Ext4,
+                size_bytes: 1 << 30,
+            },
+            PartitionPlan {
+                label: "EPHEMERAL".into(),
+                part_type: PartType::LinuxFilesystem,
+                fs: FsType::Ext4,
+                size_bytes: 0,
+            },
+        ];
+        let devs = be.add_partitions("/dev/sda", &plan).await.unwrap();
+        // Numbered AFTER the one existing partition: sda2, sda3.
+        assert_eq!(devs, vec!["/dev/sda2".to_string(), "/dev/sda3".to_string()]);
+
+        // Recorded as a single append of (disk, [labels]).
+        assert_eq!(
+            be.adds(),
+            vec![(
+                "/dev/sda".to_string(),
+                vec!["STATE".to_string(), "EPHEMERAL".to_string()]
+            )]
+        );
+
+        // The existing EFI is untouched; the two new volumes are now listed.
+        let vols = be.list_volumes().await.unwrap();
+        assert_eq!(vols.len(), 3);
+        assert!(vols.iter().any(|v| v.partition_label == "EFI"));
+        assert!(vols.iter().any(|v| v.device == "/dev/sda2"));
+        assert!(vols.iter().any(|v| v.device == "/dev/sda3"));
+
+        // RE-ENTRY GUARD: appending the same labels again must refuse loudly —
+        // nothing written, and only the one successful append recorded.
+        let err = be.add_partitions("/dev/sda", &plan).await;
+        assert!(err.is_err(), "duplicate-label append must error");
+        assert!(
+            err.unwrap_err().to_string().contains("STATE"),
+            "error names the duplicate label"
+        );
+        assert_eq!(be.adds().len(), 1, "failed append is not recorded");
+        assert_eq!(
+            be.list_volumes().await.unwrap().len(),
+            3,
+            "no partition was added by the refused call"
+        );
     }
 }

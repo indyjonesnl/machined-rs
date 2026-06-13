@@ -27,6 +27,9 @@ pub enum ProvisionDecision {
     Skip,
     /// The disk is blank, or wipe was requested — lay out fresh.
     Provision,
+    /// The disk carries EXACTLY one partition, labeled EFI — a freshly
+    /// flashed machined image. Append STATE+EPHEMERAL; never touch EFI.
+    CompleteLayout,
     /// The disk has foreign data and wipe was not requested — refuse.
     RefuseForeign,
 }
@@ -58,14 +61,28 @@ pub fn plan_provisioning(
         && LABELS.iter().all(|l| labels.contains(l))
         && labels.iter().all(|l| LABELS.contains(l));
 
+    // IMAGE ADOPTION: a freshly-flashed machined image disk carries EXACTLY one
+    // partition, labeled EFI — the imager writes GPT + EFI only, nothing else.
+    // That single-EFI shape is trustworthy as "our image": the imager is the
+    // sole writer of it, and ANY extra partition (even a second EFI) means the
+    // disk is no longer that pristine shape, so it falls through to foreign.
+    // Exactly-one-EFI is therefore append-safe: STATE+EPHEMERAL go into the free
+    // space the imager left, and EFI is never touched.
+    let is_image = on_disk.len() == 1 && labels == ["EFI"];
+
     // CONSERVATIVE SAFETY: wipe == false is NEVER destructive. An empty discovered
     // set does NOT mean "blank" — discovery is GPT-only and best-effort, so an MBR
     // disk or an unreadable disk also produces no DiscoveredVolume. Anything not
-    // already exactly ours therefore requires explicit wipe to provision.
+    // already exactly ours (or our flashed image) therefore requires explicit
+    // wipe to provision. Wipe is checked BEFORE image adoption: an explicit wipe
+    // request is an operator asking for a clean slate, which outranks adopting
+    // the image layout in place.
     if is_ours {
         ProvisionDecision::Skip
     } else if wipe {
         ProvisionDecision::Provision
+    } else if is_image {
+        ProvisionDecision::CompleteLayout
     } else {
         ProvisionDecision::RefuseForeign
     }
@@ -239,6 +256,57 @@ mod guard_tests {
             ProvisionDecision::RefuseForeign
         );
     }
+
+    #[test]
+    fn efi_only_disk_completes_layout() {
+        // A flashed machined image: exactly one partition, labeled EFI.
+        let d = vec![vol("sda", "EFI")];
+        assert_eq!(
+            plan_provisioning("/dev/sda", false, &d),
+            ProvisionDecision::CompleteLayout
+        );
+    }
+
+    #[test]
+    fn efi_plus_foreign_refuses() {
+        let d = vec![vol("sda", "EFI"), vol("sda", "WINDOWS")];
+        assert_eq!(
+            plan_provisioning("/dev/sda", false, &d),
+            ProvisionDecision::RefuseForeign
+        );
+    }
+
+    #[test]
+    fn two_efi_partitions_refuse() {
+        // Ambiguous: not the image layout, not ours — refuse.
+        let d = vec![vol("sda", "EFI"), vol("sda", "EFI")];
+        assert_eq!(
+            plan_provisioning("/dev/sda", false, &d),
+            ProvisionDecision::RefuseForeign
+        );
+    }
+
+    #[test]
+    fn efi_only_with_wipe_still_provisions_fresh() {
+        // Explicit wipe outranks adoption: operator asked for a clean slate.
+        let d = vec![vol("sda", "EFI")];
+        assert_eq!(
+            plan_provisioning("/dev/sda", true, &d),
+            ProvisionDecision::Provision
+        );
+    }
+
+    #[test]
+    fn efi_only_on_other_disk_does_not_complete() {
+        // The lone EFI lives on sdb; the install disk is sda. The disk filter
+        // must apply BEFORE the image-layout check, so sda sees no volumes →
+        // wipe:false → RefuseForeign (never CompleteLayout on the wrong disk).
+        let d = vec![vol("sdb", "EFI")];
+        assert_eq!(
+            plan_provisioning("/dev/sda", false, &d),
+            ProvisionDecision::RefuseForeign
+        );
+    }
 }
 
 pub struct VolumeProvisionerController {
@@ -331,6 +399,36 @@ impl Controller for VolumeProvisionerController {
                     .await
                     .map_err(ctl)?;
                 let mut statuses = Vec::new();
+                for (plan, device) in layout.iter().zip(devices.iter()) {
+                    self.backend
+                        .format(device, plan.fs, &plan.label)
+                        .await
+                        .map_err(ctl)?;
+                    statuses.push(volume_status_obj(
+                        &plan.label,
+                        device,
+                        plan.fs.as_str(),
+                        &plan.label,
+                        VolumePhase::Provisioned,
+                    ));
+                }
+                reconcile_owned(&ctx.state, OWNER, NS, ResourceType::VolumeStatus, statuses)?;
+            }
+            ProvisionDecision::CompleteLayout => {
+                info!(disk = %disk, "image disk: completing layout (appending STATE+EPHEMERAL)");
+                // Append-only: take the fixed layout MINUS EFI (the imager already
+                // wrote it). EFI is never re-partitioned and never re-formatted.
+                let layout: Vec<PartitionPlan> = fixed_layout()
+                    .into_iter()
+                    .filter(|p| p.label != "EFI")
+                    .collect();
+                let devices = self
+                    .backend
+                    .add_partitions(&disk, &layout)
+                    .await
+                    .map_err(ctl)?;
+                // The EFI VolumeStatus is republished from discovery (untouched).
+                let mut statuses = provisioned_status_from_discovered(&disk, &discovered);
                 for (plan, device) in layout.iter().zip(devices.iter()) {
                     self.backend
                         .format(device, plan.fs, &plan.label)
@@ -542,6 +640,80 @@ mod controller_tests {
         c.reconcile(&ctx).await.unwrap();
         // Still only one create — the second pass Skipped.
         assert_eq!(backend.creates().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn image_disk_completes_layout_without_touching_efi() {
+        // The imager wrote GPT + EFI: the real disk (fake backend) already
+        // carries the EFI partition, and discovery has reported it. add_partitions
+        // numbers the appended partitions AFTER this existing one.
+        let backend = Arc::new(
+            FakeBlockBackend::new().with_volume(machined_block::VolumeInfo {
+                device: "/dev/sda1".into(),
+                disk: "sda".into(),
+                partition_uuid: "u".into(),
+                partition_label: "EFI".into(),
+                partition_type_guid: "g".into(),
+                fs_type: Some(FsType::Vfat),
+                fs_label: None,
+                fs_uuid: None,
+                size_bytes: 512 << 20,
+            }),
+        );
+        let state = State::new();
+        seed_disk_status(&state, "sda");
+        seed_discovered(&state, "sda", "EFI");
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
+        let mut c = VolumeProvisionerController::new(backend.clone(), provider("/dev/sda", false));
+        c.reconcile(&ctx).await.unwrap();
+
+        // No wipe, no full re-create; exactly one append.
+        assert!(backend.wipes().is_empty());
+        assert!(backend.creates().is_empty());
+        assert_eq!(backend.adds().len(), 1);
+        // The append carried exactly STATE + EPHEMERAL (EFI excluded).
+        assert_eq!(
+            backend.adds()[0].1,
+            vec!["STATE".to_string(), "EPHEMERAL".to_string()]
+        );
+
+        // EFI-NEVER: only the two new partitions get formatted.
+        let formatted: Vec<String> = backend.formats().into_iter().map(|(_, _, l)| l).collect();
+        assert_eq!(formatted.len(), 2);
+        assert!(formatted.iter().all(|l| l != "EFI"), "{formatted:?}");
+        // Both new partitions formatted ext4.
+        assert!(backend
+            .formats()
+            .iter()
+            .all(|(_, fs, _)| *fs == FsType::Ext4));
+
+        // All three volumes published.
+        let vols = state.list(NS, ResourceType::VolumeStatus);
+        assert_eq!(vols.len(), 3);
+
+        let status = |name: &str| -> VolumeStatus {
+            vols.iter()
+                .find_map(|o| match &o.spec {
+                    Resource::VolumeStatus(v) if v.name == name => Some(v.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing VolumeStatus {name}"))
+        };
+
+        // EFI comes from discovery: device /dev/sda1, untouched.
+        let efi = status("EFI");
+        assert_eq!(efi.device, "/dev/sda1");
+        assert_eq!(efi.phase, VolumePhase::Provisioned);
+
+        // The two appended ones are Provisioned ext4 on the appended devices.
+        for (name, device) in [("STATE", "/dev/sda2"), ("EPHEMERAL", "/dev/sda3")] {
+            let s = status(name);
+            assert_eq!(s.device, device, "{name}");
+            assert_eq!(s.fs, "ext4", "{name}");
+            assert_eq!(s.phase, VolumePhase::Provisioned, "{name}");
+        }
     }
 
     #[tokio::test]
