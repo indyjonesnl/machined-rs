@@ -1782,3 +1782,14 @@ Expected: clean. Then follow superpowers:finishing-a-development-branch (merge -
 - x86_64 bare-metal self-boot, aarch64/Pi: M7c per spec.
 - Flash-to-larger-disk leaves the backup GPT mid-disk (image is 4 GiB sparse); kernel reads the primary fine, `add_partitions` on the open existing table may warn. Handled for real in M7c (Pi SD cards) — backup-header relocation on first boot.
 - PKI-init races the STATE mount. The early `seed_pki` (Task 8) copies the baked PKI to `/system/state/pki` BEFORE the STATE volume is mounted there, so the seed lands on the initramfs rootfs and is shadowed once STATE mounts over it. On a cold boot this is benign (PKI init also runs pre-mount and sees the seeded files). On a warm boot, a fast STATE mount can win the race and present an empty `/system/state/pki` to PKI init, which then mints a fresh CA — permanently locking out the image's baked machinectl client bundle. The real fix is M7b's reordering (PKI/API init after the STATE mount). Until M7b lands, CI must remain a single cold boot per image; do not add warm-reboot assertions that talk to the API with the baked bundle.
+
+## Outcome
+
+Boot test green on CI: the image boots in QEMU, the mTLS API answers (`API up: 0.1.0`), and `VolumeStatus` shows EFI vfat + STATE/EPHEMERAL ext4 all `Provisioned`. Run time ~3.5 min warm.
+
+The real boot shook out four bugs that unit tests against fakes could never have caught — which is exactly the boot-test's reason to exist:
+
+1. **vfat mount failed without `nls_utf8`** — mounting the EFI partition needed an `iocharset` the initramfs didn't carry; the module closure had to include the NLS codec.
+2. **PID 1 ran with an empty `PATH`** — the kernel hands `/init` no environment, so musl's `execvp` of helpers like `mkfs.ext4` in `/sbin` failed until machined set `PATH` itself.
+3. **`address EEXIST` wasn't treated as converged** — re-adding an address already present returned `EEXIST` and stalled the network reconcile instead of being read as already-applied.
+4. **route controller wasn't watching `AddressStatus`** — routes reconciled before their address existed and never re-ran, so the default route never installed until the input edge was added.

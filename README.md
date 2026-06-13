@@ -120,13 +120,17 @@ grace-expired service kill is observable in the API rather than silent.
 | Payload bring-up gated on runtime readiness | ✅ |
 | Graceful stop: SIGTERM→grace→kill (process groups), sync+unmount | ✅ |
 | Reset: wipe STATE+EPHEMERAL → reboot → reprovision | ✅ |
-| Bootable image pipeline, upgrade/kexec | 🔜 next |
+| Bootable disk image + QEMU-verified boot (x86_64) | ✅ |
+| ARM/Pi image, upgrade/kexec | 🔜 next |
 | Streaming logs/events RPCs, per-service health probes | 🔜 planned |
 
-There is no installer image yet — machined wants to be PID 1 on a disk it
-provisioned, and the image pipeline is the next milestone. Until then the full
-lifecycle runs in the test suite, and every subsystem can be driven against
-its fake backend on any Linux machine.
+There is an image now: `machined-imager` builds a bootable x86_64 disk image
+from pinned Alpine artifacts entirely in userspace — no root, no loop devices —
+and CI boots it in QEMU and asserts the mTLS API answers and STATE+EPHEMERAL
+provision (`make boot-test`). What's still pending is x86 bare-metal self-boot
+and the ARM/Pi image (M7b/M7c). Either way the full lifecycle also runs in the
+test suite, and every subsystem can be driven against its fake backend on any
+Linux machine.
 
 ## Build & test
 
@@ -134,6 +138,7 @@ its fake backend on any Linux machine.
 cargo build --workspace
 make pre-commit     # fmt + clippy -D warnings + full test suite (root-free)
 make root-tests     # privileged tier: loop devices, netns, clock, real containerd
+make boot-test      # build the x86_64 image + boot it in QEMU; asserts API + provisioning
 ```
 
 No system `protoc` needed — protobuf codegen uses a vendored binary.
@@ -141,14 +146,14 @@ No system `protoc` needed — protobuf codegen uses a vendored binary.
 ## How it's built
 
 Every subsystem has a committed design spec and implementation plan under
-[`docs/superpowers/`](docs/superpowers/) — 16 crates, each milestone
+[`docs/superpowers/`](docs/superpowers/) — 17 crates, each milestone
 brainstormed, spec'd, reviewed, and merged behind `clippy -D warnings` and a
 green suite. Read [`docs/superpowers/specs/`](docs/superpowers/specs/) to see
 *why* anything is the way it is before changing it.
 
 Good entry points if you want to contribute:
 
-- **Image pipeline** — make machined actually bootable (the headline gap).
+- **Bare-metal & Pi boot** — x86 self-boot machinery and the aarch64/Pi image (M7b/M7c).
 - **Streaming RPCs** — `machinectl logs`/`events` over the existing API.
 - **Per-service health probes** — HTTP/exec checks feeding the readiness gate.
 - **cgroups** — resource limits for supervised services.
