@@ -204,8 +204,30 @@ async fn perform_reset(
     }
 }
 
+/// The kernel execs `/init` (PID 1) with an EMPTY environment, so PATH is unset.
+/// std's `Command` resolves bare program names via `execvp`, and musl's `execvp`
+/// fallback when PATH is unset is `"/usr/local/bin:/bin:/usr/bin"` — which omits
+/// `/sbin`, where e2fsprogs installs `mkfs.ext4` (and where many other system
+/// binaries live). Returns the PATH to set when the current one is absent/empty,
+/// or `None` to leave an existing PATH untouched. Pure so it's race-free to test.
+fn default_path_if_unset(current: Option<&std::ffi::OsStr>) -> Option<&'static str> {
+    match current {
+        Some(p) if !p.is_empty() => None,
+        _ => Some("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
+    }
+}
+
 async fn run_daemon() -> anyhow::Result<()> {
     info!("machined starting (pid {})", std::process::id());
+
+    // Before spawning anything: give PID1 a usable PATH. The kernel hands /init
+    // an empty env, and musl's execvp fallback omits /sbin (where mkfs.ext4 and
+    // friends live), so e.g. the block backend's `mkfs.ext4` lookup would fail
+    // with ENOENT. Off-image (env already populated) this is a no-op.
+    if let Some(path) = default_path_if_unset(std::env::var_os("PATH").as_deref()) {
+        std::env::set_var("PATH", path);
+    }
+
     let platform = build_platform();
     let shutdown = CancellationToken::new();
 
@@ -447,6 +469,21 @@ mod tests {
                 last_message: String::new(),
             }),
         ));
+    }
+
+    #[test]
+    fn default_path_set_only_when_unset_or_empty() {
+        use std::ffi::OsStr;
+        // Unset → supply the /sbin-inclusive fallback.
+        let p = default_path_if_unset(None).expect("unset PATH gets a default");
+        assert!(
+            p.split(':').any(|d| d == "/sbin"),
+            "fallback must include /sbin"
+        );
+        // Empty → also supply the fallback (kernel may pass PATH="").
+        assert!(default_path_if_unset(Some(OsStr::new(""))).is_some());
+        // Already populated → leave it alone.
+        assert!(default_path_if_unset(Some(OsStr::new("/custom/bin"))).is_none());
     }
 
     #[test]

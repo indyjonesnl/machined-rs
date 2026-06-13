@@ -47,6 +47,17 @@ fn net<E: std::fmt::Display>(e: E) -> NetlinkError {
     NetlinkError::Netlink(e.to_string())
 }
 
+/// EEXIST: the kernel rejecting an add because the exact object is already
+/// present. errno 17; netlink reports it as a negative code (`-17`).
+const EEXIST: i32 = 17;
+
+/// True when `e` is the netlink "already exists" (EEXIST) error. Adding an
+/// address (or route) that is already present is convergence, not a failure —
+/// the caller should treat it as `Ok`. Pure, so it's cheap to unit-test.
+fn is_already_exists(e: &rtnetlink::Error) -> bool {
+    matches!(e, rtnetlink::Error::NetlinkError(em) if em.raw_code() == -EEXIST)
+}
+
 #[async_trait]
 impl NetworkBackend for RtNetlink {
     async fn list_links(&self) -> Result<Vec<LinkState>> {
@@ -124,12 +135,20 @@ impl NetworkBackend for RtNetlink {
 
     async fn add_address(&self, link: &str, addr: AddrCidr) -> Result<()> {
         let index = self.link_index(link).await?;
-        self.handle
+        match self
+            .handle
             .address()
             .add(index, addr.ip, addr.prefix)
             .execute()
             .await
-            .map_err(net)
+        {
+            Ok(()) => Ok(()),
+            // EEXIST for the address we wanted IS convergence (e.g. a second
+            // reconcile after a partial first pass): treat it as success so the
+            // controller can publish AddressStatus and unblock dependents.
+            Err(e) if is_already_exists(&e) => Ok(()),
+            Err(e) => Err(net(e)),
+        }
     }
 
     async fn del_address(&self, link: &str, addr: AddrCidr) -> Result<()> {
@@ -212,5 +231,37 @@ impl NetworkBackend for RtNetlink {
         // teardown. A full del_route lands with M2b's richer route handling.
         // Returning Ok keeps revert idempotent.
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use netlink_packet_core::ErrorMessage;
+    use std::num::NonZeroI32;
+
+    fn netlink_err(code: i32) -> rtnetlink::Error {
+        // ErrorMessage is #[non_exhaustive], so neither a struct literal nor
+        // functional-update works cross-crate. Construct via Default, then set
+        // the public `code` field by mutation.
+        #[allow(clippy::field_reassign_with_default)]
+        let mut em = ErrorMessage::default();
+        em.code = NonZeroI32::new(code);
+        rtnetlink::Error::NetlinkError(em)
+    }
+
+    #[test]
+    fn eexist_is_already_exists() {
+        // Netlink reports errno as a negative code; EEXIST is -17.
+        assert!(is_already_exists(&netlink_err(-EEXIST)));
+    }
+
+    #[test]
+    fn other_errnos_are_not_already_exists() {
+        // ENETUNREACH (-101), EPERM (-1), and a non-netlink error must not be
+        // swallowed as convergence.
+        assert!(!is_already_exists(&netlink_err(-101)));
+        assert!(!is_already_exists(&netlink_err(-1)));
+        assert!(!is_already_exists(&rtnetlink::Error::RequestFailed));
     }
 }

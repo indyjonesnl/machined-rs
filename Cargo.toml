@@ -38,6 +38,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rtnetlink = "0.14"
 netlink-packet-route = "0.19"
+netlink-packet-core = "0.7"
 futures = "0.3"
 gpt = "3.1"
 # rcgen 0.13.2: x509-parser feature is required for CertificateParams::from_ca_cert_pem
