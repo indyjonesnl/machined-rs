@@ -23,7 +23,6 @@ pub struct ArchConfig {
     /// Partition table scheme. Consumed by the image writer (M7c-2 Task 3).
     pub scheme: PartScheme,
     /// True when this arch needs Raspberry Pi firmware staging (M7c-2 Task 4).
-    #[allow(dead_code)]
     pub rpi_firmware: bool,
 }
 

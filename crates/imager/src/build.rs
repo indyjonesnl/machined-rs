@@ -97,6 +97,12 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
     let kernel_bytes =
         std::fs::read(&kernel).with_context(|| format!("reading kernel {}", kernel.display()))?;
 
+    // Stage Pi GPU firmware + DTB while rootfs/boot still exists: the next step
+    // (prune_for_initramfs) deletes rootfs/boot, and the blobs live there.
+    if cfg.rpi_firmware {
+        crate::rpi::stage_pi_firmware(&rootfs, &staging)?;
+    }
+
     // 4. Initramfs carries ONLY the resolved closure, not all modules.
     prune_for_initramfs(&rootfs, &kver, &mods)?;
     let initrd = initramfs::build_initramfs(&rootfs, o.machined, &mods, &kver)?;

@@ -14,6 +14,7 @@ mod initramfs;
 mod manifest;
 mod modules;
 mod pki;
+mod rpi;
 
 #[derive(Parser)]
 #[command(name = "machined-imager", version)]
