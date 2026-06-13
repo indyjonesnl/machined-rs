@@ -80,6 +80,11 @@ pub const VIRT_MODULES: &[&str] = &[
     "nls_utf8",
 ];
 
+/// The Raspberry Pi (linux-rpi) initramfs module roots. EMPTY: the Pi kernel
+/// builds the SD/MMC host (sdhci-iproc, bcm2835-sdhost), ext4, fat/vfat, and
+/// nls_cp437 in — the initramfs needs no storage/fs modules for an SD boot.
+pub const PI_MODULES: &[&str] = &[];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +139,16 @@ kernel/lib/crc32c.ko.gz:
         assert!(pos("crc32c") < pos("ext4"));
         assert!(pos("crc32c") < pos("xfs"));
         assert_eq!(order.len(), 3, "{order:?}");
+    }
+
+    #[test]
+    fn empty_roots_yields_no_modules() {
+        // The Pi build passes PI_MODULES (empty): no roots → no module paths.
+        let order = resolve_closure(DEP, &[]).unwrap();
+        assert!(
+            order.is_empty(),
+            "empty roots resolve to no modules: {order:?}"
+        );
     }
 
     #[test]

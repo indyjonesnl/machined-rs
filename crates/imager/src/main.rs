@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod apk;
+mod arch;
 mod boot;
 mod build;
 mod cpio;
@@ -26,7 +27,7 @@ enum Command {
     /// Build a bootable disk image.
     Build {
         /// Target architecture.
-        #[arg(long, value_parser = ["x86_64", "aarch64"])]
+        #[arg(long, value_parser = ["x86_64", "aarch64", "aarch64-rpi"])]
         arch: String,
         /// Path to the static machined binary (musl).
         #[arg(long)]

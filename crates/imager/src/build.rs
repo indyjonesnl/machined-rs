@@ -85,9 +85,15 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
     let dep_path = rootfs.join("lib/modules").join(&kver).join("modules.dep");
     let dep = std::fs::read_to_string(&dep_path)
         .with_context(|| format!("reading {}", dep_path.display()))?;
-    let mods = modules::resolve_closure(&dep, modules::VIRT_MODULES)?;
-    let kernel = rootfs.join("boot/vmlinuz-virt");
-    anyhow::ensure!(kernel.exists(), "kernel missing from linux-virt apk");
+    let cfg = crate::arch::arch_config(o.arch)
+        .ok_or_else(|| anyhow::anyhow!("unknown arch {}", o.arch))?;
+    let mods = modules::resolve_closure(&dep, cfg.module_roots)?;
+    let kernel = rootfs.join(cfg.kernel_path);
+    anyhow::ensure!(
+        kernel.exists(),
+        "kernel {} missing from apk",
+        cfg.kernel_path
+    );
     let kernel_bytes =
         std::fs::read(&kernel).with_context(|| format!("reading kernel {}", kernel.display()))?;
 
