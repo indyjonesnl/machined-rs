@@ -20,6 +20,8 @@ pub struct Recorded {
     pub rebooted: bool,
     pub poweroff: bool,
     pub cgroup_delegated: bool,
+    pub kexec_loaded: Option<(String, String, String)>, // (kernel, initrd, cmdline)
+    pub reboot_kexec: bool,
 }
 
 #[derive(Default)]
@@ -144,6 +146,18 @@ impl Platform for FakePlatform {
     }
     fn poweroff(&self) -> Result<()> {
         self.recorded.lock().unwrap().poweroff = true;
+        Ok(())
+    }
+    fn kexec_load(&self, kernel: &Path, initrd: &Path, cmdline: &str) -> Result<()> {
+        self.recorded.lock().unwrap().kexec_loaded = Some((
+            kernel.to_string_lossy().into_owned(),
+            initrd.to_string_lossy().into_owned(),
+            cmdline.to_string(),
+        ));
+        Ok(())
+    }
+    fn reboot_kexec(&self) -> Result<()> {
+        self.recorded.lock().unwrap().reboot_kexec = true;
         Ok(())
     }
 }
@@ -305,5 +319,28 @@ mod tests {
         let p = FakePlatform::new();
         p.delegate_cgroups().unwrap();
         assert!(p.recorded.lock().unwrap().cgroup_delegated);
+    }
+
+    #[test]
+    fn fake_records_kexec_load_and_fire() {
+        use std::path::Path;
+        let p = FakePlatform::new();
+        p.kexec_load(
+            Path::new("/var/up/vmlinuz"),
+            Path::new("/var/up/initramfs.img"),
+            "console=ttyS0",
+        )
+        .unwrap();
+        p.reboot_kexec().unwrap();
+        let rec = p.recorded.lock().unwrap();
+        assert_eq!(
+            rec.kexec_loaded.as_ref(),
+            Some(&(
+                "/var/up/vmlinuz".to_string(),
+                "/var/up/initramfs.img".to_string(),
+                "console=ttyS0".to_string()
+            ))
+        );
+        assert!(rec.reboot_kexec);
     }
 }

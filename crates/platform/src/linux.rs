@@ -156,6 +156,43 @@ impl Platform for LinuxPlatform {
             .map(|_| ())
             .map_err(|e| PlatformError::Other(format!("poweroff: {e}")))
     }
+
+    fn kexec_load(&self, kernel: &Path, initrd: &Path, cmdline: &str) -> Result<()> {
+        use std::os::fd::AsRawFd;
+        let kf = fs::File::open(kernel)
+            .map_err(|e| PlatformError::Other(format!("open kernel {}: {e}", kernel.display())))?;
+        let rf = fs::File::open(initrd)
+            .map_err(|e| PlatformError::Other(format!("open initrd {}: {e}", initrd.display())))?;
+        // cmdline must be NUL-terminated; the length passed includes the NUL.
+        let c = std::ffi::CString::new(cmdline)
+            .map_err(|e| PlatformError::Other(format!("cmdline: {e}")))?;
+        // SAFETY: the fds are valid for the duration of the call; the cmdline
+        // ptr/len describe a valid NUL-terminated buffer; flags=0 loads
+        // kernel+initrd (no KEXEC_FILE_NO_INITRAMFS).
+        let rc = unsafe {
+            libc::syscall(
+                libc::SYS_kexec_file_load,
+                kf.as_raw_fd(),
+                rf.as_raw_fd(),
+                c.as_bytes_with_nul().len() as libc::c_ulong,
+                c.as_ptr(),
+                0 as libc::c_ulong,
+            )
+        };
+        if rc != 0 {
+            return Err(PlatformError::Other(format!(
+                "kexec_file_load: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(())
+    }
+
+    fn reboot_kexec(&self) -> Result<()> {
+        reboot(RebootMode::RB_KEXEC)
+            .map(|_| ())
+            .map_err(|e| PlatformError::Other(format!("reboot(RB_KEXEC): {e}")))
+    }
 }
 
 #[cfg(test)]

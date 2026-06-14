@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 thiserror.workspace = true
 tracing.workspace = true
+libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nix.workspace = true
