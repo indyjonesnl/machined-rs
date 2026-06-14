@@ -238,16 +238,26 @@ mod tests {
 
     #[tokio::test]
     async fn fake_pod_ip_reflects_seeded_ip() {
-        let f = FakeCriClient::new().with_version("c", "2").with_pod_ip("10.88.0.7");
+        let f = FakeCriClient::new()
+            .with_version("c", "2")
+            .with_pod_ip("10.88.0.7");
         let id = f
-            .run_pod_sandbox(&crate::PodSpec { name: "n".into(), uid: "u".into(), host_network: false })
+            .run_pod_sandbox(&crate::PodSpec {
+                name: "n".into(),
+                uid: "u".into(),
+                host_network: false,
+            })
             .await
             .unwrap();
         assert_eq!(f.pod_ip(&id).await.unwrap().as_deref(), Some("10.88.0.7"));
         // A fake with no seeded ip reports None.
         let g = FakeCriClient::new().with_version("c", "2");
         let gid = g
-            .run_pod_sandbox(&crate::PodSpec { name: "n".into(), uid: "u".into(), host_network: false })
+            .run_pod_sandbox(&crate::PodSpec {
+                name: "n".into(),
+                uid: "u".into(),
+                host_network: false,
+            })
             .await
             .unwrap();
         assert_eq!(g.pod_ip(&gid).await.unwrap(), None);
