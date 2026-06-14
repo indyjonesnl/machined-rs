@@ -114,6 +114,7 @@ pub fn resource_to_fields(spec: &Resource) -> Vec<(String, String)> {
             kv("name", &p.name),
             kv("phase", format!("{:?}", p.phase)),
             kv("container_id", &p.container_id),
+            kv("pod_ip", &p.pod_ip),
             kv("message", &p.message),
         ],
     }
