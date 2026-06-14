@@ -270,6 +270,12 @@ kernel/fs/nls/nls_cp437.ko.gz:
 kernel/fs/nls/nls_iso8859_1.ko.gz:
 kernel/fs/nls/nls_utf8.ko.gz:
 kernel/fs/overlayfs/overlay.ko.gz:
+kernel/drivers/net/veth.ko.gz:
+kernel/net/bridge/bridge.ko.gz:
+kernel/net/bridge/br_netfilter.ko.gz:
+kernel/net/netfilter/nf_tables.ko.gz:
+kernel/net/netfilter/nf_nat.ko.gz:
+kernel/net/netfilter/nf_conntrack.ko.gz:
 ";
 
     /// All `.ko.gz` paths declared in MODULES_DEP (closure members) plus one
@@ -287,6 +293,12 @@ kernel/fs/overlayfs/overlay.ko.gz:
         "kernel/fs/nls/nls_iso8859_1.ko.gz",
         "kernel/fs/nls/nls_utf8.ko.gz",
         "kernel/fs/overlayfs/overlay.ko.gz",
+        "kernel/drivers/net/veth.ko.gz",
+        "kernel/net/bridge/bridge.ko.gz",
+        "kernel/net/bridge/br_netfilter.ko.gz",
+        "kernel/net/netfilter/nf_tables.ko.gz",
+        "kernel/net/netfilter/nf_nat.ko.gz",
+        "kernel/net/netfilter/nf_conntrack.ko.gz",
     ];
     const UNUSED_KO_GZ: &str = "kernel/net/unused.ko.gz";
 
