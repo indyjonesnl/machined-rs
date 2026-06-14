@@ -5,6 +5,16 @@ use crate::types::{RestartPolicy, RuntimeSection, ServiceConfig};
 /// The reserved id of the machined-managed runtime service.
 pub const RUNTIME_SERVICE_ID: &str = "containerd";
 
+/// The pre-baked pause image the containerd CRI uses for pod sandboxes. Staged
+/// on /boot/images and imported at boot (see ctr_import_args). containerd-specific.
+pub const PAUSE_IMAGE: &str = "registry.k8s.io/pause:3.10";
+
+/// `ctr` argv that imports a pre-baked OCI archive into the k8s.io namespace the
+/// CRI plugin reads. containerd-specific — swapping the CRI runtime swaps this.
+pub fn ctr_import_args<'a>(socket: &'a str, tar: &'a str) -> Vec<&'a str> {
+    vec!["--address", socket, "-n", "k8s.io", "images", "import", tar]
+}
+
 /// The injected containerd service definition.
 pub fn containerd_service(rt: &RuntimeSection) -> ServiceConfig {
     ServiceConfig {
@@ -35,6 +45,7 @@ state = "/run/containerd"
   address = "{socket}"
 
 [plugins.'io.containerd.cri.v1.runtime']
+  sandbox_image = "{pause}"
   [plugins.'io.containerd.cri.v1.runtime'.containerd]
     default_runtime_name = "runc"
 
@@ -45,7 +56,8 @@ state = "/run/containerd"
         SystemdCgroup = false
         BinaryName = "/boot/bin/runc"
 "#,
-        socket = rt.socket
+        socket = rt.socket,
+        pause = PAUSE_IMAGE
     )
 }
 
@@ -151,6 +163,27 @@ mod tests {
         assert!(
             toml_str.contains("address = \"/run/containerd/containerd.sock\""),
             "{toml_str}"
+        );
+    }
+
+    #[test]
+    fn config_sets_sandbox_image() {
+        let toml_str = containerd_config_toml(&RuntimeSection::default());
+        assert!(toml_str.contains(&format!("sandbox_image = \"{PAUSE_IMAGE}\"")), "{toml_str}");
+        // still valid TOML.
+        toml::from_str::<toml::Value>(&toml_str).expect("valid TOML");
+    }
+
+    #[test]
+    fn ctr_import_argv_is_k8s_namespaced() {
+        let argv = ctr_import_args("/run/containerd/containerd.sock", "/boot/images/busybox.tar");
+        assert_eq!(
+            argv,
+            vec![
+                "--address", "/run/containerd/containerd.sock",
+                "-n", "k8s.io",
+                "images", "import", "/boot/images/busybox.tar",
+            ]
         );
     }
 
