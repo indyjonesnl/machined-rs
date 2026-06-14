@@ -10,10 +10,12 @@ use tower::service_fn;
 use crate::pb::image_service_client::ImageServiceClient;
 use crate::pb::runtime_service_client::RuntimeServiceClient;
 use crate::pb::{
-    ImageSpec, ImageStatusRequest, LinuxPodSandboxConfig, LinuxSandboxSecurityContext,
-    ListPodSandboxRequest, NamespaceMode, NamespaceOption, PodSandboxConfig, PodSandboxFilter,
-    PodSandboxMetadata, PodSandboxState, PodSandboxStateValue, PullImageRequest,
-    RunPodSandboxRequest, StatusRequest, VersionRequest,
+    ContainerConfig, ContainerFilter, ContainerMetadata, ContainerState as PbContainerState,
+    ContainerStatusRequest, CreateContainerRequest, ImageSpec, ImageStatusRequest,
+    LinuxPodSandboxConfig, LinuxSandboxSecurityContext, ListContainersRequest, ListPodSandboxRequest,
+    NamespaceMode, NamespaceOption, PodSandboxConfig, PodSandboxFilter, PodSandboxMetadata,
+    PodSandboxState, PodSandboxStateValue, PullImageRequest, RunPodSandboxRequest,
+    StartContainerRequest, StatusRequest, VersionRequest,
 };
 use crate::{CriClient, CriError, Result, RuntimeVersion};
 
@@ -61,6 +63,15 @@ impl GrpcCriClient {
             .await
             .map_err(|e| CriError::Connect(e.to_string()))?;
         Ok(ImageServiceClient::new(channel))
+    }
+}
+
+fn map_state(pb: i32) -> crate::ContainerState {
+    match PbContainerState::try_from(pb) {
+        Ok(PbContainerState::ContainerCreated) => crate::ContainerState::Created,
+        Ok(PbContainerState::ContainerRunning) => crate::ContainerState::Running,
+        Ok(PbContainerState::ContainerExited) => crate::ContainerState::Exited,
+        _ => crate::ContainerState::Unknown,
     }
 }
 
@@ -186,5 +197,81 @@ impl CriClient for GrpcCriClient {
             .map_err(|e| CriError::Rpc(e.to_string()))?
             .into_inner();
         Ok(resp.items.into_iter().next().map(|s| s.id))
+    }
+
+    async fn create_container(&self, sandbox_id: &str, c: &crate::ContainerSpec) -> Result<String> {
+        let mut client = self.connect().await?;
+        let config = ContainerConfig {
+            metadata: Some(ContainerMetadata {
+                name: c.name.clone(),
+                attempt: 0,
+            }),
+            image: Some(ImageSpec {
+                image: c.image.clone(),
+            }),
+            command: c.command.clone(),
+            args: c.args.clone(),
+            labels: std::collections::HashMap::from([(
+                "io.machined.container".to_string(),
+                c.name.clone(),
+            )]),
+        };
+        let resp = client
+            .create_container(CreateContainerRequest {
+                pod_sandbox_id: sandbox_id.to_string(),
+                config: Some(config),
+                sandbox_config: None,
+            })
+            .await
+            .map_err(|e| CriError::Rpc(e.to_string()))?
+            .into_inner();
+        Ok(resp.container_id)
+    }
+
+    async fn start_container(&self, container_id: &str) -> Result<()> {
+        let mut client = self.connect().await?;
+        client
+            .start_container(StartContainerRequest {
+                container_id: container_id.to_string(),
+            })
+            .await
+            .map_err(|e| CriError::Rpc(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn find_container(&self, sandbox_id: &str, name: &str) -> Result<Option<String>> {
+        let mut client = self.connect().await?;
+        let resp = client
+            .list_containers(ListContainersRequest {
+                filter: Some(ContainerFilter {
+                    id: String::new(),
+                    state: None,
+                    pod_sandbox_id: sandbox_id.to_string(),
+                    label_selector: std::collections::HashMap::from([(
+                        "io.machined.container".to_string(),
+                        name.to_string(),
+                    )]),
+                }),
+            })
+            .await
+            .map_err(|e| CriError::Rpc(e.to_string()))?
+            .into_inner();
+        Ok(resp.containers.into_iter().next().map(|c| c.id))
+    }
+
+    async fn container_state(&self, container_id: &str) -> Result<crate::ContainerState> {
+        let mut client = self.connect().await?;
+        let resp = client
+            .container_status(ContainerStatusRequest {
+                container_id: container_id.to_string(),
+                verbose: false,
+            })
+            .await
+            .map_err(|e| CriError::Rpc(e.to_string()))?
+            .into_inner();
+        Ok(resp
+            .status
+            .map(|s| map_state(s.state))
+            .unwrap_or(crate::ContainerState::Unknown))
     }
 }

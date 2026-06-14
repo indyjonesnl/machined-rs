@@ -39,6 +39,24 @@ pub struct PodSpec {
     pub host_network: bool,
 }
 
+/// What machined needs to create a container in a sandbox.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContainerSpec {
+    pub name: String,
+    pub image: String,
+    pub command: Vec<String>,
+    pub args: Vec<String>,
+}
+
+/// Vendor-neutral container state (maps CRI ContainerState).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContainerState {
+    Created,
+    Running,
+    Exited,
+    Unknown,
+}
+
 /// Health-probe view of a CRI runtime.
 #[async_trait]
 pub trait CriClient: Send + Sync {
@@ -55,4 +73,12 @@ pub trait CriClient: Send + Sync {
     async fn run_pod_sandbox(&self, pod: &PodSpec) -> Result<String>;
     /// Find a READY sandbox whose metadata name == `name`; the labelled id, if any.
     async fn find_sandbox(&self, name: &str) -> Result<Option<String>>;
+    /// Create a container in a sandbox; returns its id (CRI CreateContainer).
+    async fn create_container(&self, sandbox_id: &str, c: &ContainerSpec) -> Result<String>;
+    /// Start a created container (CRI StartContainer).
+    async fn start_container(&self, container_id: &str) -> Result<()>;
+    /// Find a container by metadata name within a sandbox; its id, if any.
+    async fn find_container(&self, sandbox_id: &str, name: &str) -> Result<Option<String>>;
+    /// Read a container's current state (CRI ContainerStatus).
+    async fn container_state(&self, container_id: &str) -> Result<ContainerState>;
 }

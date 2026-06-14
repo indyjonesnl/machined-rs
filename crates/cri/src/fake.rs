@@ -14,6 +14,8 @@ struct FakeState {
     images: std::collections::HashSet<String>,
     next_id: usize,
     sandboxes: Vec<(String, String)>, // (id, name)
+    // (id, sandbox_id, name, running)
+    containers: Vec<(String, String, String, bool)>,
 }
 
 #[derive(Default)]
@@ -100,6 +102,43 @@ impl CriClient for FakeCriClient {
             .find(|(_, n)| n == name)
             .map(|(id, _)| id.clone()))
     }
+
+    async fn create_container(&self, sandbox_id: &str, c: &crate::ContainerSpec) -> Result<String> {
+        let mut s = self.state.lock().unwrap();
+        s.next_id += 1;
+        let id = format!("ctr-{}", s.next_id);
+        s.containers
+            .push((id.clone(), sandbox_id.to_string(), c.name.clone(), false));
+        Ok(id)
+    }
+
+    async fn start_container(&self, container_id: &str) -> Result<()> {
+        let mut s = self.state.lock().unwrap();
+        if let Some(c) = s.containers.iter_mut().find(|c| c.0 == container_id) {
+            c.3 = true;
+        }
+        Ok(())
+    }
+
+    async fn find_container(&self, sandbox_id: &str, name: &str) -> Result<Option<String>> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .containers
+            .iter()
+            .find(|c| c.1 == sandbox_id && c.2 == name)
+            .map(|c| c.0.clone()))
+    }
+
+    async fn container_state(&self, container_id: &str) -> Result<crate::ContainerState> {
+        let s = self.state.lock().unwrap();
+        Ok(match s.containers.iter().find(|c| c.0 == container_id) {
+            Some(c) if c.3 => crate::ContainerState::Running,
+            Some(_) => crate::ContainerState::Created,
+            None => crate::ContainerState::Unknown,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -147,5 +186,42 @@ mod tests {
             Some(id.as_str())
         );
         assert_eq!(f.sandbox_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn fake_container_lifecycle() {
+        use crate::{ContainerSpec, ContainerState, PodSpec};
+        let f = FakeCriClient::new()
+            .with_version("containerd", "2.0")
+            .with_image("busybox:1.36");
+        let sb = f
+            .run_pod_sandbox(&PodSpec {
+                name: "hello".into(),
+                uid: "u".into(),
+                host_network: true,
+            })
+            .await
+            .unwrap();
+        let cspec = ContainerSpec {
+            name: "hello".into(),
+            image: "busybox:1.36".into(),
+            command: vec!["/bin/sh".into(), "-c".into()],
+            args: vec!["sleep 3600".into()],
+        };
+        assert!(f.find_container(&sb, "hello").await.unwrap().is_none());
+        let id = f.create_container(&sb, &cspec).await.unwrap();
+        assert_eq!(
+            f.container_state(&id).await.unwrap(),
+            ContainerState::Created
+        );
+        f.start_container(&id).await.unwrap();
+        assert_eq!(
+            f.container_state(&id).await.unwrap(),
+            ContainerState::Running
+        );
+        assert_eq!(
+            f.find_container(&sb, "hello").await.unwrap().as_deref(),
+            Some(id.as_str())
+        );
     }
 }
