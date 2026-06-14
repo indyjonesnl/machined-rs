@@ -258,6 +258,7 @@ kernel/fs/fat/fat.ko.gz:
 kernel/fs/nls/nls_cp437.ko.gz:
 kernel/fs/nls/nls_iso8859_1.ko.gz:
 kernel/fs/nls/nls_utf8.ko.gz:
+kernel/fs/overlayfs/overlay.ko.gz:
 ";
 
     /// All `.ko.gz` paths declared in MODULES_DEP (closure members) plus one
@@ -274,6 +275,7 @@ kernel/fs/nls/nls_utf8.ko.gz:
         "kernel/fs/nls/nls_cp437.ko.gz",
         "kernel/fs/nls/nls_iso8859_1.ko.gz",
         "kernel/fs/nls/nls_utf8.ko.gz",
+        "kernel/fs/overlayfs/overlay.ko.gz",
     ];
     const UNUSED_KO_GZ: &str = "kernel/net/unused.ko.gz";
 
