@@ -27,6 +27,11 @@ const CNI_BIN_SUBDIR: &str = "cni/bin";
 /// The CNI plugins machined's default bridge conflist references.
 const CNI_WANTED_PLUGINS: &[&str] = &["bridge", "host-local", "loopback"];
 
+/// Subdir of the FAT staging tree for the CNI conflist.
+const CNI_CONF_SUBDIR: &str = "cni/conf";
+/// The default bridge conflist, embedded at build time (swappable default).
+const BRIDGE_CONFLIST: &str = include_str!("../assets/10-machined-bridge.conflist");
+
 /// Run the full image build: validate the config, fetch + extract every pinned
 /// apk, resolve the kernel module closure, assemble the initramfs, and write a
 /// GPT/FAT image (optionally copying a kernel/initramfs pair to `emit_boot`).
@@ -138,6 +143,14 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
     let config_dst = staging.join("config.yaml");
     std::fs::write(&config_dst, &config_text)
         .with_context(|| format!("writing {}", config_dst.display()))?;
+    let cni_conf_dir = staging.join(CNI_CONF_SUBDIR);
+    std::fs::create_dir_all(&cni_conf_dir)
+        .with_context(|| format!("create {}", cni_conf_dir.display()))?;
+    std::fs::write(
+        cni_conf_dir.join("10-machined-bridge.conflist"),
+        BRIDGE_CONFLIST,
+    )
+    .with_context(|| "writing bridge conflist".to_string())?;
     if let Some(pki) = o.pki_dir {
         let dst = staging.join("pki");
         std::fs::create_dir_all(&dst).with_context(|| format!("creating {}", dst.display()))?;
@@ -632,6 +645,15 @@ kind = "cni-plugins"
             assert!(cni_names.contains(&want.to_string()), "{cni_names:?}");
         }
         assert_eq!(read_fat_file(&fs, "cni/bin/bridge"), b"ELF-br");
+
+        // The bridge conflist is staged to /cni/conf on the FAT.
+        let conf = read_fat_file(&fs, "cni/conf/10-machined-bridge.conflist");
+        let conf_s = String::from_utf8_lossy(&conf);
+        assert!(conf_s.contains("\"type\": \"bridge\""), "{conf_s}");
+        assert!(
+            conf_s.contains("\"ipMasqBackend\": \"nftables\""),
+            "{conf_s}"
+        );
 
         // initramfs.img gunzips to a cpio with the expected payload.
         let initrd = gunzip(&read_fat_file(&fs, "initramfs.img"));
