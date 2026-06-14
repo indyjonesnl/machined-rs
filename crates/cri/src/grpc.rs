@@ -14,8 +14,8 @@ use crate::pb::{
     ContainerStatusRequest, CreateContainerRequest, ImageSpec, ImageStatusRequest,
     LinuxPodSandboxConfig, LinuxSandboxSecurityContext, ListContainersRequest,
     ListPodSandboxRequest, NamespaceMode, NamespaceOption, PodSandboxConfig, PodSandboxFilter,
-    PodSandboxMetadata, PodSandboxState, PodSandboxStateValue, PullImageRequest,
-    RunPodSandboxRequest, StartContainerRequest, StatusRequest, VersionRequest,
+    PodSandboxMetadata, PodSandboxState, PodSandboxStateValue, PodSandboxStatusRequest,
+    PullImageRequest, RunPodSandboxRequest, StartContainerRequest, StatusRequest, VersionRequest,
 };
 use crate::{CriClient, CriError, Result, RuntimeVersion};
 
@@ -273,5 +273,23 @@ impl CriClient for GrpcCriClient {
             .status
             .map(|s| map_state(s.state))
             .unwrap_or(crate::ContainerState::Unknown))
+    }
+
+    async fn pod_ip(&self, sandbox_id: &str) -> Result<Option<String>> {
+        let mut client = self.connect().await?;
+        let resp = client
+            .pod_sandbox_status(PodSandboxStatusRequest {
+                pod_sandbox_id: sandbox_id.to_string(),
+                verbose: false,
+            })
+            .await
+            .map_err(|e| CriError::Rpc(e.to_string()))?
+            .into_inner();
+        let ip = resp
+            .status
+            .and_then(|s| s.network)
+            .map(|n| n.ip)
+            .filter(|ip| !ip.is_empty());
+        Ok(ip)
     }
 }

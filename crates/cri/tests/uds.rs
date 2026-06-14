@@ -5,9 +5,9 @@ use machined_cri::pb::runtime_service_server::{RuntimeService, RuntimeServiceSer
 use machined_cri::pb::{
     ContainerStatusRequest, ContainerStatusResponse, CreateContainerRequest,
     CreateContainerResponse, ListContainersRequest, ListContainersResponse, ListPodSandboxRequest,
-    ListPodSandboxResponse, RunPodSandboxRequest, RunPodSandboxResponse, RuntimeCondition,
-    RuntimeStatus, StartContainerRequest, StartContainerResponse, StatusRequest, StatusResponse,
-    VersionRequest, VersionResponse,
+    ListPodSandboxResponse, PodSandboxStatusRequest, PodSandboxStatusResponse, RunPodSandboxRequest,
+    RunPodSandboxResponse, RuntimeCondition, RuntimeStatus, StartContainerRequest,
+    StartContainerResponse, StatusRequest, StatusResponse, VersionRequest, VersionResponse,
 };
 use machined_cri::{CriClient, GrpcCriClient};
 use tonic::{Request, Response, Status};
@@ -95,6 +95,13 @@ impl RuntimeService for FakeCriServer {
         _r: Request<ContainerStatusRequest>,
     ) -> Result<Response<ContainerStatusResponse>, Status> {
         Err(Status::unimplemented("container_status"))
+    }
+
+    async fn pod_sandbox_status(
+        &self,
+        _r: Request<PodSandboxStatusRequest>,
+    ) -> Result<Response<PodSandboxStatusResponse>, Status> {
+        Err(Status::unimplemented("pod_sandbox_status"))
     }
 }
 

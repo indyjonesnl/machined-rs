@@ -16,6 +16,7 @@ struct FakeState {
     sandboxes: Vec<(String, String)>, // (id, name)
     // (id, sandbox_id, name, running)
     containers: Vec<(String, String, String, bool)>,
+    default_sandbox_ip: Option<String>,
 }
 
 #[derive(Default)]
@@ -44,6 +45,12 @@ impl FakeCriClient {
 
     pub fn with_image(self, image: &str) -> Self {
         self.state.lock().unwrap().images.insert(image.to_string());
+        self
+    }
+
+    /// Seed the IP every created sandbox reports via pod_ip (CNI-assigned IP sim).
+    pub fn with_pod_ip(self, ip: &str) -> Self {
+        self.state.lock().unwrap().default_sandbox_ip = Some(ip.to_string());
         self
     }
 
@@ -139,6 +146,10 @@ impl CriClient for FakeCriClient {
             None => crate::ContainerState::Unknown,
         })
     }
+
+    async fn pod_ip(&self, _sandbox_id: &str) -> Result<Option<String>> {
+        Ok(self.state.lock().unwrap().default_sandbox_ip.clone())
+    }
 }
 
 #[cfg(test)]
@@ -223,5 +234,22 @@ mod tests {
             f.find_container(&sb, "hello").await.unwrap().as_deref(),
             Some(id.as_str())
         );
+    }
+
+    #[tokio::test]
+    async fn fake_pod_ip_reflects_seeded_ip() {
+        let f = FakeCriClient::new().with_version("c", "2").with_pod_ip("10.88.0.7");
+        let id = f
+            .run_pod_sandbox(&crate::PodSpec { name: "n".into(), uid: "u".into(), host_network: false })
+            .await
+            .unwrap();
+        assert_eq!(f.pod_ip(&id).await.unwrap().as_deref(), Some("10.88.0.7"));
+        // A fake with no seeded ip reports None.
+        let g = FakeCriClient::new().with_version("c", "2");
+        let gid = g
+            .run_pod_sandbox(&crate::PodSpec { name: "n".into(), uid: "u".into(), host_network: false })
+            .await
+            .unwrap();
+        assert_eq!(g.pod_ip(&gid).await.unwrap(), None);
     }
 }
