@@ -1,6 +1,9 @@
 # QEMU user-net (slirp) static layout: guest 10.0.2.15/24, gw 10.0.2.2, dns 10.0.2.3.
 machine:
   hostname: node-ci
+  sysctls:
+    - key: net.bridge.bridge-nf-call-iptables
+      value: "1"
   network:
     interfaces:
       - name: eth0
@@ -20,3 +23,8 @@ machine:
       command: ["/bin/sh", "-c"]
       args: ["echo machined-pod-ok; sleep 3600"]
       host_network: true
+    - name: netpod
+      image: docker.io/library/busybox:1.36
+      command: ["/bin/sh", "-c"]
+      args: ["echo machined-netpod-ok; sleep 3600"]
+      host_network: false
