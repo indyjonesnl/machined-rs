@@ -137,11 +137,24 @@ impl PodController {
         // 4. observe + report.
         match self.cri.container_state(&container).await {
             Ok(ContainerState::Running) => {
-                status_obj(&p.name, PodPhase::Running, &container, "", "")
+                // Best-effort: CNI may still be assigning; empty until it lands,
+                // refilled on the next 5s resync.
+                let ip = self
+                    .cri
+                    .pod_ip(&sandbox)
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                status_obj(&p.name, PodPhase::Running, &container, "", &ip)
             }
-            Ok(ContainerState::Exited) => {
-                status_obj(&p.name, PodPhase::Failed, &container, "container exited", "")
-            }
+            Ok(ContainerState::Exited) => status_obj(
+                &p.name,
+                PodPhase::Failed,
+                &container,
+                "container exited",
+                "",
+            ),
             Ok(_) => status_obj(&p.name, PodPhase::Pending, &container, "starting", ""),
             Err(e) => status_obj(&p.name, PodPhase::Pending, &container, &e.to_string(), ""),
         }
@@ -309,5 +322,25 @@ mod tests {
         let st = pod_status(&state, "hello");
         assert_eq!(st.phase, PodPhase::Pending);
         assert_eq!(st.message, "image not present");
+    }
+
+    #[tokio::test]
+    async fn running_pod_reports_cni_ip() {
+        let cri = Arc::new(
+            FakeCriClient::new()
+                .with_version("c", "2")
+                .with_image("busybox:1.36")
+                .with_pod_ip("10.88.0.5"),
+        );
+        let state = State::new();
+        mark_ready(&state);
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
+        let mut c = PodController::new(cri, provider_with_pod(false));
+        c.reconcile(&ctx).await.unwrap();
+        let st = pod_status(&state, "hello");
+        assert_eq!(st.phase, PodPhase::Running);
+        assert_eq!(st.pod_ip, "10.88.0.5");
     }
 }
