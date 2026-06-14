@@ -287,9 +287,15 @@ mod tests {
     fn subtree_line_intersects_desired_with_available() {
         use crate::subtree_control_line;
         // All desired available → all, in desired order, each + prefixed.
-        assert_eq!(subtree_control_line(&["cpu", "memory", "pids", "io"]), "+cpu +memory +pids +io");
+        assert_eq!(
+            subtree_control_line(&["cpu", "memory", "pids", "io"]),
+            "+cpu +memory +pids +io"
+        );
         // io unavailable → dropped, rest kept.
-        assert_eq!(subtree_control_line(&["cpu", "memory", "pids"]), "+cpu +memory +pids");
+        assert_eq!(
+            subtree_control_line(&["cpu", "memory", "pids"]),
+            "+cpu +memory +pids"
+        );
         // an unrelated available controller is ignored.
         assert_eq!(subtree_control_line(&["cpu", "rdma"]), "+cpu");
     }

@@ -39,9 +39,19 @@ pub async fn import_boot_images(socket: String) {
     for tar in tars {
         let tar_s = tar.to_string_lossy().to_string();
         let args = ctr_import_args(&socket, &tar_s);
-        match tokio::process::Command::new("ctr").args(&args).output().await {
+        // Absolute path (the containerd static tarball stages ctr there),
+        // mirroring the runc BinaryName = /boot/bin/runc convention — robust
+        // even if /boot/bin ever drops off PATH.
+        match tokio::process::Command::new("/boot/bin/ctr")
+            .args(&args)
+            .output()
+            .await
+        {
             Ok(o) if o.status.success() => info!("imported image {tar_s}"),
-            Ok(o) => warn!("ctr import {tar_s} failed: {}", String::from_utf8_lossy(&o.stderr)),
+            Ok(o) => warn!(
+                "ctr import {tar_s} failed: {}",
+                String::from_utf8_lossy(&o.stderr)
+            ),
             Err(e) => warn!("spawning ctr for {tar_s}: {e}"),
         }
     }

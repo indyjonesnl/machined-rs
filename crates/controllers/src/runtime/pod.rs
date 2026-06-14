@@ -10,7 +10,9 @@ use machined_cri::{ContainerSpec, ContainerState, CriClient, PodSpec};
 use machined_resources::{
     Key, PodPhase, PodStatus, Resource, ResourceObject, ResourceType, RuntimeStatus,
 };
-use machined_runtime_core::{reconcile_owned, Controller, Input, InputKind, Output, OutputKind, ReconcileCtx};
+use machined_runtime_core::{
+    reconcile_owned, Controller, Input, InputKind, Output, OutputKind, ReconcileCtx,
+};
 use tracing::warn;
 
 use super::NS;
@@ -43,24 +45,37 @@ fn status_obj(name: &str, phase: PodPhase, container_id: &str, message: &str) ->
 
 fn runtime_ready(state: &machined_runtime_core::State) -> bool {
     matches!(
-        state.get(&Key::new(NS, ResourceType::RuntimeStatus, "containerd")).map(|o| o.spec),
+        state
+            .get(&Key::new(NS, ResourceType::RuntimeStatus, "containerd"))
+            .map(|o| o.spec),
         Ok(Resource::RuntimeStatus(RuntimeStatus { ready: true, .. }))
     )
 }
 
 #[async_trait]
 impl Controller for PodController {
-    fn name(&self) -> &str { OWNER }
+    fn name(&self) -> &str {
+        OWNER
+    }
 
     fn inputs(&self) -> Vec<Input> {
-        vec![Input { namespace: NS.into(), typ: ResourceType::RuntimeStatus, kind: InputKind::Weak }]
+        vec![Input {
+            namespace: NS.into(),
+            typ: ResourceType::RuntimeStatus,
+            kind: InputKind::Weak,
+        }]
     }
 
     fn outputs(&self) -> Vec<Output> {
-        vec![Output { typ: ResourceType::PodStatus, kind: OutputKind::Exclusive }]
+        vec![Output {
+            typ: ResourceType::PodStatus,
+            kind: OutputKind::Exclusive,
+        }]
     }
 
-    fn resync_interval(&self) -> Option<Duration> { Some(Duration::from_secs(5)) }
+    fn resync_interval(&self) -> Option<Duration> {
+        Some(Duration::from_secs(5))
+    }
 
     async fn reconcile(&mut self, ctx: &ReconcileCtx) -> machined_runtime_core::Result<()> {
         let pods = self.provider.pods();
@@ -73,7 +88,12 @@ impl Controller for PodController {
         let mut desired = Vec::with_capacity(pods.len());
         for p in pods {
             if !ready {
-                desired.push(status_obj(&p.name, PodPhase::Pending, "", "runtime not ready"));
+                desired.push(status_obj(
+                    &p.name,
+                    PodPhase::Pending,
+                    "",
+                    "runtime not ready",
+                ));
                 continue;
             }
             desired.push(self.run_one(p).await);
@@ -107,25 +127,57 @@ impl PodController {
         // 4. observe + report.
         match self.cri.container_state(&container).await {
             Ok(ContainerState::Running) => status_obj(&p.name, PodPhase::Running, &container, ""),
-            Ok(ContainerState::Exited) => status_obj(&p.name, PodPhase::Failed, &container, "container exited"),
+            Ok(ContainerState::Exited) => {
+                status_obj(&p.name, PodPhase::Failed, &container, "container exited")
+            }
             Ok(_) => status_obj(&p.name, PodPhase::Pending, &container, "starting"),
             Err(e) => status_obj(&p.name, PodPhase::Pending, &container, &e.to_string()),
         }
     }
 
-    async fn ensure_sandbox(&self, p: &machined_config::PodConfig) -> std::result::Result<String, String> {
-        if let Some(id) = self.cri.find_sandbox(&p.name).await.map_err(|e| e.to_string())? {
+    async fn ensure_sandbox(
+        &self,
+        p: &machined_config::PodConfig,
+    ) -> std::result::Result<String, String> {
+        if let Some(id) = self
+            .cri
+            .find_sandbox(&p.name)
+            .await
+            .map_err(|e| e.to_string())?
+        {
             return Ok(id);
         }
-        let spec = PodSpec { name: p.name.clone(), uid: format!("uid-{}", p.name), host_network: p.host_network };
-        self.cri.run_pod_sandbox(&spec).await.map_err(|e| e.to_string())
+        let spec = PodSpec {
+            name: p.name.clone(),
+            uid: format!("uid-{}", p.name),
+            host_network: p.host_network,
+        };
+        self.cri
+            .run_pod_sandbox(&spec)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    async fn ensure_container(&self, sandbox: &str, p: &machined_config::PodConfig) -> std::result::Result<String, String> {
-        if let Some(id) = self.cri.find_container(sandbox, &p.name).await.map_err(|e| e.to_string())? {
+    async fn ensure_container(
+        &self,
+        sandbox: &str,
+        p: &machined_config::PodConfig,
+    ) -> std::result::Result<String, String> {
+        if let Some(id) = self
+            .cri
+            .find_container(sandbox, &p.name)
+            .await
+            .map_err(|e| e.to_string())?
+        {
             // start if still in Created.
-            if matches!(self.cri.container_state(&id).await, Ok(ContainerState::Created)) {
-                self.cri.start_container(&id).await.map_err(|e| e.to_string())?;
+            if matches!(
+                self.cri.container_state(&id).await,
+                Ok(ContainerState::Created)
+            ) {
+                self.cri
+                    .start_container(&id)
+                    .await
+                    .map_err(|e| e.to_string())?;
             }
             return Ok(id);
         }
@@ -135,8 +187,15 @@ impl PodController {
             command: p.command.clone(),
             args: p.args.clone(),
         };
-        let id = self.cri.create_container(sandbox, &cspec).await.map_err(|e| e.to_string())?;
-        self.cri.start_container(&id).await.map_err(|e| e.to_string())?;
+        let id = self
+            .cri
+            .create_container(sandbox, &cspec)
+            .await
+            .map_err(|e| e.to_string())?;
+        self.cri
+            .start_container(&id)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(id)
     }
 }
@@ -164,7 +223,11 @@ mod tests {
     }
 
     fn pod_status(state: &State, name: &str) -> PodStatus {
-        match state.get(&Key::new(NS, ResourceType::PodStatus, name)).unwrap().spec {
+        match state
+            .get(&Key::new(NS, ResourceType::PodStatus, name))
+            .unwrap()
+            .spec
+        {
             Resource::PodStatus(p) => p,
             _ => panic!("wrong type"),
         }
@@ -172,16 +235,27 @@ mod tests {
 
     fn mark_ready(state: &State) {
         let _ = state.create(ResourceObject::new(
-            NS, "containerd",
-            Resource::RuntimeStatus(RuntimeStatus { ready: true, name: "containerd".into(), version: "2".into() }),
+            NS,
+            "containerd",
+            Resource::RuntimeStatus(RuntimeStatus {
+                ready: true,
+                name: "containerd".into(),
+                version: "2".into(),
+            }),
         ));
     }
 
     #[tokio::test]
     async fn pending_when_runtime_not_ready() {
-        let cri = Arc::new(FakeCriClient::new().with_version("c", "2").with_image("busybox:1.36"));
+        let cri = Arc::new(
+            FakeCriClient::new()
+                .with_version("c", "2")
+                .with_image("busybox:1.36"),
+        );
         let state = State::new();
-        let ctx = ReconcileCtx { state: state.clone() };
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
         let mut c = PodController::new(cri, provider_with_pod(true));
         c.reconcile(&ctx).await.unwrap();
         assert_eq!(pod_status(&state, "hello").phase, PodPhase::Pending);
@@ -189,10 +263,16 @@ mod tests {
 
     #[tokio::test]
     async fn runs_pod_when_ready_and_image_present() {
-        let cri = Arc::new(FakeCriClient::new().with_version("c", "2").with_image("busybox:1.36"));
+        let cri = Arc::new(
+            FakeCriClient::new()
+                .with_version("c", "2")
+                .with_image("busybox:1.36"),
+        );
         let state = State::new();
         mark_ready(&state);
-        let ctx = ReconcileCtx { state: state.clone() };
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
         let mut c = PodController::new(cri.clone(), provider_with_pod(true));
         c.reconcile(&ctx).await.unwrap();
         let st = pod_status(&state, "hello");
@@ -209,7 +289,9 @@ mod tests {
         let cri = Arc::new(FakeCriClient::new().with_version("c", "2")); // no image
         let state = State::new();
         mark_ready(&state);
-        let ctx = ReconcileCtx { state: state.clone() };
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
         let mut c = PodController::new(cri, provider_with_pod(true));
         c.reconcile(&ctx).await.unwrap();
         let st = pod_status(&state, "hello");

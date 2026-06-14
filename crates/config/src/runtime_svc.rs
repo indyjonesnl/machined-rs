@@ -169,20 +169,30 @@ mod tests {
     #[test]
     fn config_sets_sandbox_image() {
         let toml_str = containerd_config_toml(&RuntimeSection::default());
-        assert!(toml_str.contains(&format!("sandbox_image = \"{PAUSE_IMAGE}\"")), "{toml_str}");
+        assert!(
+            toml_str.contains(&format!("sandbox_image = \"{PAUSE_IMAGE}\"")),
+            "{toml_str}"
+        );
         // still valid TOML.
         toml::from_str::<toml::Value>(&toml_str).expect("valid TOML");
     }
 
     #[test]
     fn ctr_import_argv_is_k8s_namespaced() {
-        let argv = ctr_import_args("/run/containerd/containerd.sock", "/boot/images/busybox.tar");
+        let argv = ctr_import_args(
+            "/run/containerd/containerd.sock",
+            "/boot/images/busybox.tar",
+        );
         assert_eq!(
             argv,
             vec![
-                "--address", "/run/containerd/containerd.sock",
-                "-n", "k8s.io",
-                "images", "import", "/boot/images/busybox.tar",
+                "--address",
+                "/run/containerd/containerd.sock",
+                "-n",
+                "k8s.io",
+                "images",
+                "import",
+                "/boot/images/busybox.tar",
             ]
         );
     }

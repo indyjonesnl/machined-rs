@@ -78,8 +78,8 @@ pub fn essential_mounts() -> Vec<MountSpec> {
         m("tmpfs", "/tmp", "tmpfs"),
         // cgroup v2 unified hierarchy — containerd/runc need it for container
         // cgroups. (RuntimeReady itself doesn't require it, but a functional
-        // runtime does; controller subtree-delegation is deferred to the
-        // pod-launch milestone.)
+        // runtime does; controller subtree-delegation + the PID1 leaf-move are
+        // done at PID1 early boot via `Platform::delegate_cgroups`.)
         m("cgroup2", "/sys/fs/cgroup", "cgroup2"),
     ]
 }

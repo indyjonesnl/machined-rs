@@ -213,10 +213,8 @@ machine:
 
     #[test]
     fn pods_default_empty_and_host_network_defaults_false() {
-        let cfg: MachineConfig = serde_yaml::from_str(
-            "machine:\n  pods:\n    - name: p\n      image: img\n",
-        )
-        .unwrap();
+        let cfg: MachineConfig =
+            serde_yaml::from_str("machine:\n  pods:\n    - name: p\n      image: img\n").unwrap();
         assert!(!cfg.machine.pods[0].host_network);
         assert!(cfg.machine.pods[0].command.is_empty());
     }

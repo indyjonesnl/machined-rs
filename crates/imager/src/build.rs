@@ -560,7 +560,10 @@ rename = "pause.tar"
             .map(|e| e.unwrap().file_name())
             .filter(|n| n != "." && n != "..")
             .collect();
-        assert!(img_names.contains(&"pause.tar".to_string()), "{img_names:?}");
+        assert!(
+            img_names.contains(&"pause.tar".to_string()),
+            "{img_names:?}"
+        );
         assert_eq!(read_fat_file(&fs, "images/pause.tar"), b"OCI-ARCHIVE-PAUSE");
 
         // initramfs.img gunzips to a cpio with the expected payload.
