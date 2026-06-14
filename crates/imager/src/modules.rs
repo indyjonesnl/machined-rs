@@ -78,6 +78,8 @@ pub const VIRT_MODULES: &[&str] = &[
     // The kernel's vfat default iocharset is utf8 (CONFIG_FAT_DEFAULT_IOCHARSET="utf8");
     // without nls_utf8 the boot-partition mount EINVALs ("IO charset utf8 not found").
     "nls_utf8",
+    // containerd's overlayfs snapshotter needs overlay.ko for image layers.
+    "overlay",
 ];
 
 /// The Raspberry Pi (linux-rpi) initramfs module roots. EMPTY: the Pi kernel

@@ -25,6 +25,7 @@ pub enum ResourceType {
     MountStatus,
     TimeStatus,
     RuntimeStatus,
+    PodStatus,
 }
 
 impl fmt::Display for ResourceType {
@@ -46,6 +47,7 @@ impl fmt::Display for ResourceType {
             ResourceType::MountStatus => "MountStatus",
             ResourceType::TimeStatus => "TimeStatus",
             ResourceType::RuntimeStatus => "RuntimeStatus",
+            ResourceType::PodStatus => "PodStatus",
         };
         f.write_str(s)
     }

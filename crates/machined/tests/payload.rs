@@ -45,6 +45,42 @@ impl CriClient for FlipCri {
     async fn ready(&self) -> Result<bool, CriError> {
         Ok(self.ready.load(std::sync::atomic::Ordering::SeqCst))
     }
+    // CRI pod-lifecycle methods are unused by this M4 readiness test — minimal stubs.
+    async fn image_present(&self, _image: &str) -> Result<bool, CriError> {
+        Ok(false)
+    }
+    async fn pull_image(&self, _image: &str) -> Result<(), CriError> {
+        Ok(())
+    }
+    async fn run_pod_sandbox(&self, _pod: &machined_cri::PodSpec) -> Result<String, CriError> {
+        Ok(String::new())
+    }
+    async fn find_sandbox(&self, _name: &str) -> Result<Option<String>, CriError> {
+        Ok(None)
+    }
+    async fn create_container(
+        &self,
+        _sandbox_id: &str,
+        _c: &machined_cri::ContainerSpec,
+    ) -> Result<String, CriError> {
+        Ok(String::new())
+    }
+    async fn start_container(&self, _container_id: &str) -> Result<(), CriError> {
+        Ok(())
+    }
+    async fn find_container(
+        &self,
+        _sandbox_id: &str,
+        _name: &str,
+    ) -> Result<Option<String>, CriError> {
+        Ok(None)
+    }
+    async fn container_state(
+        &self,
+        _container_id: &str,
+    ) -> Result<machined_cri::ContainerState, CriError> {
+        Ok(machined_cri::ContainerState::Unknown)
+    }
 }
 
 fn svc_state(state: &State, id: &str) -> Option<ServiceState> {

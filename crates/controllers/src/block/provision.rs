@@ -512,6 +512,7 @@ mod controller_tests {
                 }),
                 time: Default::default(),
                 runtime: Default::default(),
+                pods: vec![],
             },
         })
     }

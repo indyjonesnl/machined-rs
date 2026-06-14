@@ -26,6 +26,7 @@ async fn syncs_time_and_publishes_status() {
                 disabled: false,
             },
             runtime: Default::default(),
+            pods: vec![],
         },
     };
 

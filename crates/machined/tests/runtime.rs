@@ -27,6 +27,7 @@ async fn publishes_runtime_status() {
             install: None,
             time: Default::default(),
             runtime: Default::default(),
+            pods: vec![],
         },
     };
 

@@ -47,6 +47,7 @@ async fn config_drives_network_through_controllers() {
             install: None,
             time: Default::default(),
             runtime: Default::default(),
+            pods: vec![],
         },
     };
 

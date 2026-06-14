@@ -1,4 +1,4 @@
-.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 dist-aarch64 boot-test boot-test-aarch64 build-image-aarch64-rpi
+.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 dist-aarch64 boot-test boot-test-aarch64 build-image-aarch64-rpi boot-test-aarch64-rpi
 
 pre-commit: fmt clippy test
 
@@ -62,3 +62,11 @@ boot-test-aarch64: dist-aarch64
 build-image-aarch64-rpi: dist-aarch64
 	cargo build --release -p machined-imager -p machinectl
 	./scripts/build-test-aarch64-rpi.sh
+
+# Build the aarch64-rpi image + boot it under qemu-system-aarch64 -M raspi3ap
+# (Pi 3 SoC model, TCG), assert userland via a serial marker. Exercises the SD
+# controller + MBR + vfat /boot mount; does NOT model the VideoCore firmware
+# handoff (real hardware proves that — docs/raspberry-pi-3a-plus.md).
+boot-test-aarch64-rpi: dist-aarch64
+	cargo build --release -p machined-imager
+	./scripts/boot-test-aarch64-rpi.sh

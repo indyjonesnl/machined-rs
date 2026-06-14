@@ -6,6 +6,17 @@ package runtime.v1;
 service RuntimeService {
   rpc Version(VersionRequest) returns (VersionResponse) {}
   rpc Status(StatusRequest) returns (StatusResponse) {}
+  rpc RunPodSandbox(RunPodSandboxRequest) returns (RunPodSandboxResponse) {}
+  rpc ListPodSandbox(ListPodSandboxRequest) returns (ListPodSandboxResponse) {}
+  rpc CreateContainer(CreateContainerRequest) returns (CreateContainerResponse) {}
+  rpc StartContainer(StartContainerRequest) returns (StartContainerResponse) {}
+  rpc ListContainers(ListContainersRequest) returns (ListContainersResponse) {}
+  rpc ContainerStatus(ContainerStatusRequest) returns (ContainerStatusResponse) {}
+}
+
+service ImageService {
+  rpc ImageStatus(ImageStatusRequest) returns (ImageStatusResponse) {}
+  rpc PullImage(PullImageRequest) returns (PullImageResponse) {}
 }
 
 message VersionRequest { string version = 1; }
@@ -28,3 +39,60 @@ message StatusResponse {
   RuntimeStatus status = 1;
   map<string, string> info = 2;
 }
+
+// ---- shared ----
+message PodSandboxMetadata { string name = 1; string uid = 2; string namespace = 3; uint32 attempt = 4; }
+message ContainerMetadata { string name = 1; uint32 attempt = 2; }
+message ImageSpec { string image = 1; }
+message KeyValue { string key = 1; string value = 2; }
+
+enum NamespaceMode { POD = 0; CONTAINER = 1; NODE = 2; TARGET = 3; }
+message NamespaceOption { NamespaceMode network = 1; NamespaceMode pid = 2; NamespaceMode ipc = 3; }
+message LinuxSandboxSecurityContext { NamespaceOption namespace_options = 1; }
+message LinuxPodSandboxConfig { string cgroup_parent = 1; LinuxSandboxSecurityContext security_context = 2; }
+message PodSandboxConfig {
+  PodSandboxMetadata metadata = 1;
+  string hostname = 2;
+  string log_directory = 3;
+  map<string, string> labels = 6;
+  LinuxPodSandboxConfig linux = 8;
+}
+
+enum PodSandboxState { SANDBOX_READY = 0; SANDBOX_NOTREADY = 1; }
+message PodSandboxStateValue { PodSandboxState state = 1; }
+message PodSandboxFilter { string id = 1; PodSandboxStateValue state = 2; map<string, string> label_selector = 3; }
+message PodSandbox { string id = 1; PodSandboxMetadata metadata = 2; PodSandboxState state = 3; map<string, string> labels = 5; }
+
+enum ContainerState { CONTAINER_CREATED = 0; CONTAINER_RUNNING = 1; CONTAINER_EXITED = 2; CONTAINER_UNKNOWN = 3; }
+message ContainerStateValue { ContainerState state = 1; }
+message ContainerFilter { string id = 1; ContainerStateValue state = 2; string pod_sandbox_id = 3; map<string, string> label_selector = 4; }
+message Container { string id = 1; string pod_sandbox_id = 2; ContainerMetadata metadata = 3; ImageSpec image = 4; ContainerState state = 6; map<string, string> labels = 8; }
+message ContainerConfig {
+  ContainerMetadata metadata = 1;
+  ImageSpec image = 2;
+  repeated string command = 3;
+  repeated string args = 4;
+  map<string, string> labels = 9;
+}
+message ContainerStatus { string id = 1; ContainerMetadata metadata = 2; ContainerState state = 3; int32 exit_code = 7; string reason = 10; string message = 11; }
+
+// ---- requests / responses ----
+message RunPodSandboxRequest { PodSandboxConfig config = 1; string runtime_handler = 2; }
+message RunPodSandboxResponse { string pod_sandbox_id = 1; }
+message ListPodSandboxRequest { PodSandboxFilter filter = 1; }
+message ListPodSandboxResponse { repeated PodSandbox items = 1; }
+
+message CreateContainerRequest { string pod_sandbox_id = 1; ContainerConfig config = 2; PodSandboxConfig sandbox_config = 3; }
+message CreateContainerResponse { string container_id = 1; }
+message StartContainerRequest { string container_id = 1; }
+message StartContainerResponse {}
+message ListContainersRequest { ContainerFilter filter = 1; }
+message ListContainersResponse { repeated Container containers = 1; }
+message ContainerStatusRequest { string container_id = 1; bool verbose = 2; }
+message ContainerStatusResponse { ContainerStatus status = 1; }
+
+message ImageStatusRequest { ImageSpec image = 1; bool verbose = 2; }
+message Image { string id = 1; repeated string repo_tags = 2; repeated string repo_digests = 3; }
+message ImageStatusResponse { Image image = 1; }
+message PullImageRequest { ImageSpec image = 1; PodSandboxConfig sandbox_config = 3; }
+message PullImageResponse { string image_ref = 1; }

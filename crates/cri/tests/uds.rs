@@ -3,7 +3,11 @@
 
 use machined_cri::pb::runtime_service_server::{RuntimeService, RuntimeServiceServer};
 use machined_cri::pb::{
-    RuntimeCondition, RuntimeStatus, StatusRequest, StatusResponse, VersionRequest, VersionResponse,
+    ContainerStatusRequest, ContainerStatusResponse, CreateContainerRequest,
+    CreateContainerResponse, ListContainersRequest, ListContainersResponse, ListPodSandboxRequest,
+    ListPodSandboxResponse, RunPodSandboxRequest, RunPodSandboxResponse, RuntimeCondition,
+    RuntimeStatus, StartContainerRequest, StartContainerResponse, StatusRequest, StatusResponse,
+    VersionRequest, VersionResponse,
 };
 use machined_cri::{CriClient, GrpcCriClient};
 use tonic::{Request, Response, Status};
@@ -46,6 +50,51 @@ impl RuntimeService for FakeCriServer {
             }),
             info: Default::default(),
         }))
+    }
+
+    // Pod/container RPCs: present so the generated server trait is satisfied;
+    // these UDS tests only exercise version/status. (Client-side wiring lands
+    // in later tasks.)
+    async fn run_pod_sandbox(
+        &self,
+        _r: Request<RunPodSandboxRequest>,
+    ) -> Result<Response<RunPodSandboxResponse>, Status> {
+        Err(Status::unimplemented("run_pod_sandbox"))
+    }
+
+    async fn list_pod_sandbox(
+        &self,
+        _r: Request<ListPodSandboxRequest>,
+    ) -> Result<Response<ListPodSandboxResponse>, Status> {
+        Err(Status::unimplemented("list_pod_sandbox"))
+    }
+
+    async fn create_container(
+        &self,
+        _r: Request<CreateContainerRequest>,
+    ) -> Result<Response<CreateContainerResponse>, Status> {
+        Err(Status::unimplemented("create_container"))
+    }
+
+    async fn start_container(
+        &self,
+        _r: Request<StartContainerRequest>,
+    ) -> Result<Response<StartContainerResponse>, Status> {
+        Err(Status::unimplemented("start_container"))
+    }
+
+    async fn list_containers(
+        &self,
+        _r: Request<ListContainersRequest>,
+    ) -> Result<Response<ListContainersResponse>, Status> {
+        Err(Status::unimplemented("list_containers"))
+    }
+
+    async fn container_status(
+        &self,
+        _r: Request<ContainerStatusRequest>,
+    ) -> Result<Response<ContainerStatusResponse>, Status> {
+        Err(Status::unimplemented("container_status"))
     }
 }
 
