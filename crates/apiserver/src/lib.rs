@@ -21,11 +21,12 @@ pub async fn serve(
     addr: SocketAddr,
     state: State,
     version: impl Into<String>,
+    image_id: impl Into<String>,
     pki: &NodePki,
     actions: tokio::sync::mpsc::Sender<NodeAction>,
 ) -> Result<(), tonic::transport::Error> {
     let svc = pb::machine_service_server::MachineServiceServer::new(Machine::new(
-        state, version, actions,
+        state, version, image_id, actions,
     ));
     let tls = server_tls(pki);
     Server::builder()
@@ -40,12 +41,13 @@ pub async fn serve_with_shutdown(
     addr: SocketAddr,
     state: State,
     version: impl Into<String>,
+    image_id: impl Into<String>,
     pki: &NodePki,
     actions: tokio::sync::mpsc::Sender<NodeAction>,
     signal: impl std::future::Future<Output = ()> + Send,
 ) -> Result<(), tonic::transport::Error> {
     let svc = pb::machine_service_server::MachineServiceServer::new(Machine::new(
-        state, version, actions,
+        state, version, image_id, actions,
     ));
     let tls = server_tls(pki);
     Server::builder()

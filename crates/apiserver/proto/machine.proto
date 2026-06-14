@@ -7,10 +7,12 @@ service MachineService {
   rpc Reboot(Empty) returns (Empty);
   rpc Shutdown(Empty) returns (Empty);
   rpc Reset(Empty) returns (Empty);
+  rpc Upgrade(UpgradeRequest) returns (Empty);
 }
 
 message Empty {}
-message VersionResponse { string version = 1; }
+message VersionResponse { string version = 1; string image_id = 2; }
+message UpgradeRequest { string url = 1; string sha256 = 2; }
 
 message ListResourcesRequest {
   string namespace = 1;

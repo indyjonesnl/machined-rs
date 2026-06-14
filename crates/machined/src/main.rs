@@ -218,6 +218,15 @@ fn default_path_if_unset(current: Option<&std::ffi::OsStr>) -> Option<&'static s
     }
 }
 
+/// The image identity baked into this initramfs by the imager (`--image-id`),
+/// read from /etc/machined/image-id. Absent → "unknown". Reported via the API
+/// so an operator (and the upgrade boot-test) can see which image is running.
+fn read_image_id() -> String {
+    std::fs::read_to_string("/etc/machined/image-id")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
 async fn run_daemon() -> anyhow::Result<()> {
     info!("machined starting (pid {})", std::process::id());
 
@@ -371,11 +380,13 @@ async fn run_daemon() -> anyhow::Result<()> {
             let api_state = state.clone();
             let api_action_tx = api_action_tx.clone();
             let api_token = shutdown.clone();
+            let image_id = read_image_id();
             api_handle = Some(tokio::spawn(async move {
                 if let Err(e) = machined_apiserver::serve_with_shutdown(
                     api_addr,
                     api_state,
                     env!("CARGO_PKG_VERSION"),
+                    image_id,
                     &pki,
                     api_action_tx,
                     {
@@ -416,6 +427,7 @@ async fn run_daemon() -> anyhow::Result<()> {
             Some(NodeAction::Reboot) => FinalAction::Reboot,
             Some(NodeAction::Shutdown) => FinalAction::Poweroff,
             Some(NodeAction::Reset) => FinalAction::Reset,
+            Some(NodeAction::Upgrade { .. }) => FinalAction::Stop, // TODO(M9a Task 6): real upgrade handling
             None => FinalAction::Stop,
         },
     };
