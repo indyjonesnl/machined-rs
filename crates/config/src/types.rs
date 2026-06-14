@@ -35,6 +35,9 @@ pub struct MachineSection {
     /// Container runtime (containerd) management.
     #[serde(default)]
     pub runtime: RuntimeSection,
+    /// Pods machined runs via CRI once the runtime is ready.
+    #[serde(default)]
+    pub pods: Vec<PodConfig>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -60,6 +63,25 @@ pub struct ServiceConfig {
     /// Seconds to wait after SIGTERM before SIGKILL on stop. Default 10.
     #[serde(default)]
     pub stop_grace_secs: Option<u64>,
+}
+
+/// A pod machined runs via CRI. CRI/CNI-shaped — no runtime-vendor fields.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PodConfig {
+    /// Pod + container name (used as the CRI metadata name + PodStatus id).
+    pub name: String,
+    /// Image ref (must be present in the runtime store; pre-imported on offline nodes).
+    pub image: String,
+    /// argv[0..] for the container entrypoint.
+    #[serde(default)]
+    pub command: Vec<String>,
+    /// argv tail.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Share the node network namespace (M8a: the only supported mode; CNI is M8b).
+    #[serde(default)]
+    pub host_network: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
@@ -160,5 +182,42 @@ impl Default for RuntimeSection {
             socket: "/run/containerd/containerd.sock".into(),
             config_path: "/etc/containerd/config.toml".into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_pods_section() {
+        let cfg: MachineConfig = serde_yaml::from_str(
+            r#"
+machine:
+  pods:
+    - name: hello
+      image: docker.io/library/busybox:1.36
+      command: ["/bin/sh", "-c"]
+      args: ["echo ok; sleep 3600"]
+      host_network: true
+"#,
+        )
+        .unwrap();
+        let pods = &cfg.machine.pods;
+        assert_eq!(pods.len(), 1);
+        assert_eq!(pods[0].name, "hello");
+        assert_eq!(pods[0].image, "docker.io/library/busybox:1.36");
+        assert!(pods[0].host_network);
+        assert_eq!(pods[0].args, vec!["echo ok; sleep 3600".to_string()]);
+    }
+
+    #[test]
+    fn pods_default_empty_and_host_network_defaults_false() {
+        let cfg: MachineConfig = serde_yaml::from_str(
+            "machine:\n  pods:\n    - name: p\n      image: img\n",
+        )
+        .unwrap();
+        assert!(!cfg.machine.pods[0].host_network);
+        assert!(cfg.machine.pods[0].command.is_empty());
     }
 }

@@ -216,6 +216,7 @@ mod tests {
                 install: None,
                 time: Default::default(),
                 runtime: Default::default(),
+                pods: vec![],
             },
         })
     }
@@ -234,6 +235,7 @@ mod tests {
                 install: None,
                 time: Default::default(),
                 runtime: Default::default(),
+                pods: vec![],
             },
         })
     }
@@ -258,6 +260,7 @@ mod tests {
                 install: None,
                 time: Default::default(),
                 runtime: Default::default(),
+                pods: vec![],
             },
         })
     }

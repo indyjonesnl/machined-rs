@@ -40,6 +40,7 @@ async fn pipeline_discovers_provisions_and_mounts() {
             }),
             time: Default::default(),
             runtime: Default::default(),
+            pods: vec![],
         },
     };
 

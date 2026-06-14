@@ -12,6 +12,6 @@ pub use runtime_svc::{
     RUNTIME_SERVICE_ID,
 };
 pub use types::{
-    InstallSection, InterfaceConfig, MachineConfig, MachineSection, NetworkSection, RestartPolicy,
-    RouteConfig, RuntimeSection, ServiceConfig, Sysctl, TimeSection,
+    InstallSection, InterfaceConfig, MachineConfig, MachineSection, NetworkSection, PodConfig,
+    RestartPolicy, RouteConfig, RuntimeSection, ServiceConfig, Sysctl, TimeSection,
 };

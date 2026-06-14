@@ -136,6 +136,7 @@ mod tests {
                     disabled: true,
                     ..Default::default()
                 },
+                pods: vec![],
             },
         };
         let ctx = SequencerCtx {

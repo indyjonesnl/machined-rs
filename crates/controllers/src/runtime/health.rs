@@ -113,6 +113,7 @@ mod tests {
                     disabled,
                     ..Default::default()
                 },
+                pods: vec![],
             },
         })
     }

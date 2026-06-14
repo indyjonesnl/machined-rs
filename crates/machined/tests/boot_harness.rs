@@ -45,6 +45,7 @@ async fn boots_supervises_and_shuts_down() {
                 disabled: true,
                 ..Default::default()
             },
+            pods: vec![],
         },
     };
 
