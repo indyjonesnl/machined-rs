@@ -153,6 +153,7 @@ enum FinalAction {
     Reboot,
     Poweroff,
     Reset,
+    Kexec,
 }
 
 /// A final syscall (reboot/poweroff) failed: PID1 must never exit. Enter the
@@ -406,6 +407,7 @@ async fn run_daemon() -> anyhow::Result<()> {
     }
 
     let state_for_reset = state.clone();
+    let state_for_upgrade = state.clone();
     let ctx = SequencerCtx {
         state,
         platform: platform.clone(),
@@ -422,15 +424,28 @@ async fn run_daemon() -> anyhow::Result<()> {
     info!("boot complete; node up");
 
     // Wait for an OS termination signal OR an API-requested action.
-    let final_action = tokio::select! {
-        _ = pid1::wait_for_termination() => FinalAction::Stop,
-        a = api_action_rx.recv() => match a {
-            Some(NodeAction::Reboot) => FinalAction::Reboot,
-            Some(NodeAction::Shutdown) => FinalAction::Poweroff,
-            Some(NodeAction::Reset) => FinalAction::Reset,
-            Some(NodeAction::Upgrade { .. }) => FinalAction::Stop, // TODO(M9a Task 6): real upgrade handling
-            None => FinalAction::Stop,
-        },
+    let final_action = loop {
+        let action = tokio::select! {
+            _ = pid1::wait_for_termination() => break FinalAction::Stop,
+            a = api_action_rx.recv() => a,
+        };
+        match action {
+            Some(NodeAction::Reboot) => break FinalAction::Reboot,
+            Some(NodeAction::Shutdown) => break FinalAction::Poweroff,
+            Some(NodeAction::Reset) => break FinalAction::Reset,
+            Some(NodeAction::Upgrade { url, sha256 }) => {
+                // Prepare BEFORE committing to shutdown: a failed download /
+                // verify / kexec-load leaves the node running on the current image.
+                match upgrade::prepare(&state_for_upgrade, platform.as_ref(), &url, &sha256).await {
+                    Ok(()) => break FinalAction::Kexec,
+                    Err(e) => {
+                        error!("upgrade aborted (node stays up): {e}");
+                        continue;
+                    }
+                }
+            }
+            None => break FinalAction::Stop,
+        }
     };
     info!("shutting down");
 
@@ -476,6 +491,13 @@ async fn run_daemon() -> anyhow::Result<()> {
             perform_reset(&state_for_reset, block_for_reset.as_ref()).await;
             if let Err(e) = platform.reboot() {
                 error!("reboot failed: {e}");
+                park_after_failed_final(&platform, &e).await;
+            }
+        }
+        FinalAction::Kexec => {
+            info!("upgrade: booting the new image via kexec");
+            if let Err(e) = platform.reboot_kexec() {
+                error!("kexec reboot failed: {e}");
                 park_after_failed_final(&platform, &e).await;
             }
         }

@@ -1,10 +1,6 @@
 //! OS upgrade preparation: download an image bundle, verify its sha256, extract
 //! the kernel+initramfs, and load them into the kexec buffer — all BEFORE the
 //! daemon commits to shutting down, so a failed upgrade leaves the node running.
-//!
-//! `prepare` is wired into the daemon shutdown path in a later task; until then
-//! the bin build sees these items as unused.
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
@@ -92,7 +88,13 @@ pub async fn prepare(
 ) -> anyhow::Result<()> {
     publish(state, UpgradePhase::Downloading, url);
     let url_owned = url.to_string();
-    let bytes = tokio::task::spawn_blocking(move || http_get(&url_owned)).await??;
+    let bytes = match tokio::task::spawn_blocking(move || http_get(&url_owned)).await? {
+        Ok(b) => b,
+        Err(e) => {
+            publish(state, UpgradePhase::Failed, &e.to_string());
+            return Err(e);
+        }
+    };
 
     publish(state, UpgradePhase::Verifying, "");
     let got = sha256_hex(&bytes);
