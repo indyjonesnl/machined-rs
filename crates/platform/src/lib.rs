@@ -31,6 +31,26 @@ pub const MS_RDONLY: u64 = 0x1;
 pub const MS_NOSUID: u64 = 0x2;
 pub const MS_NODEV: u64 = 0x4;
 
+/// cgroup-v2 unified hierarchy mount point.
+pub const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+/// Controllers machined delegates to the root subtree so containers can get
+/// cpu/memory/pids/io cgroups. Intersected with what the kernel actually offers.
+pub const CGROUP_DELEGATED: &[&str] = &["cpu", "memory", "pids", "io"];
+/// Leaf cgroup PID1 moves into (cgroup-v2 "no internal processes" convention).
+pub const CGROUP_INIT_LEAF: &str = "init.scope";
+
+/// The `cgroup.subtree_control` write enabling each desired controller that is
+/// actually `available` (kernel `cgroup.controllers`), in `CGROUP_DELEGATED`
+/// order, each `+`-prefixed and space-joined. Pure.
+pub fn subtree_control_line(available: &[&str]) -> String {
+    CGROUP_DELEGATED
+        .iter()
+        .filter(|c| available.contains(c))
+        .map(|c| format!("+{c}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// A filesystem to mount during early boot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MountSpec {
@@ -73,6 +93,10 @@ pub trait Platform: Send + Sync {
     fn load_module(&self, path: &Path) -> Result<()>;
     fn set_sysctl(&self, key: &str, value: &str) -> Result<()>;
     fn set_hostname(&self, name: &str) -> Result<()>;
+    /// Move PID1 into a leaf cgroup and delegate controllers to the root
+    /// subtree so containers get cpu/memory/pids/io cgroups (cgroup-v2). A
+    /// no-op when `/sys/fs/cgroup` is not a cgroup-v2 mount.
+    fn delegate_cgroups(&self) -> Result<()>;
     fn kernel_cmdline(&self) -> Result<String>;
     /// Whether something is currently mounted at `target`.
     fn is_mounted(&self, target: &str) -> Result<bool>;

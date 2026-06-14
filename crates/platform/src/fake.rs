@@ -19,6 +19,7 @@ pub struct Recorded {
     pub hostname: Option<String>,
     pub rebooted: bool,
     pub poweroff: bool,
+    pub cgroup_delegated: bool,
 }
 
 #[derive(Default)]
@@ -76,6 +77,10 @@ impl Platform for FakePlatform {
     }
     fn set_hostname(&self, name: &str) -> Result<()> {
         self.recorded.lock().unwrap().hostname = Some(name.to_string());
+        Ok(())
+    }
+    fn delegate_cgroups(&self) -> Result<()> {
+        self.recorded.lock().unwrap().cgroup_delegated = true;
         Ok(())
     }
     fn kernel_cmdline(&self) -> Result<String> {
@@ -276,5 +281,23 @@ mod tests {
         let rec = p.recorded.lock().unwrap();
         assert_eq!(rec.unmounts, vec!["/var"]);
         assert_eq!(rec.disk_ops, vec!["unmount_lazy:/var"]);
+    }
+
+    #[test]
+    fn subtree_line_intersects_desired_with_available() {
+        use crate::subtree_control_line;
+        // All desired available → all, in desired order, each + prefixed.
+        assert_eq!(subtree_control_line(&["cpu", "memory", "pids", "io"]), "+cpu +memory +pids +io");
+        // io unavailable → dropped, rest kept.
+        assert_eq!(subtree_control_line(&["cpu", "memory", "pids"]), "+cpu +memory +pids");
+        // an unrelated available controller is ignored.
+        assert_eq!(subtree_control_line(&["cpu", "rdma"]), "+cpu");
+    }
+
+    #[test]
+    fn fake_records_cgroup_delegation() {
+        let p = FakePlatform::new();
+        p.delegate_cgroups().unwrap();
+        assert!(p.recorded.lock().unwrap().cgroup_delegated);
     }
 }

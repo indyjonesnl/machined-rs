@@ -9,7 +9,9 @@ use nix::mount::{mount, MsFlags};
 use nix::sys::reboot::{reboot, RebootMode};
 use nix::unistd::sethostname;
 
-use crate::{MountSpec, Platform, PlatformError, Result};
+use crate::{
+    MountSpec, Platform, PlatformError, Result, CGROUP_DELEGATED, CGROUP_INIT_LEAF, CGROUP_ROOT,
+};
 
 pub struct LinuxPlatform;
 
@@ -68,6 +70,38 @@ impl Platform for LinuxPlatform {
 
     fn set_hostname(&self, name: &str) -> Result<()> {
         sethostname(name).map_err(|e| PlatformError::Other(format!("sethostname: {e}")))
+    }
+
+    fn delegate_cgroups(&self) -> Result<()> {
+        let root = std::path::Path::new(CGROUP_ROOT);
+        // cgroup.controllers exists only on a cgroup-v2 mount; absent → no-op.
+        let controllers = match std::fs::read_to_string(root.join("cgroup.controllers")) {
+            Ok(s) => s,
+            Err(_) => return Ok(()),
+        };
+        let available: Vec<&str> = controllers.split_whitespace().collect();
+
+        // 1. Move PID1 into the leaf so the root has no member processes before
+        //    we enable subtree_control. Writing our pid to cgroup.procs moves
+        //    the whole (multi-threaded) process atomically.
+        let leaf = root.join(CGROUP_INIT_LEAF);
+        std::fs::create_dir_all(&leaf)
+            .map_err(|e| PlatformError::Other(format!("mkdir {}: {e}", leaf.display())))?;
+        std::fs::write(leaf.join("cgroup.procs"), format!("{}", std::process::id()))
+            .map_err(|e| PlatformError::Other(format!("move pid1 to {}: {e}", leaf.display())))?;
+
+        // 2. Delegate the available∩desired controllers to root's children.
+        let want: Vec<&str> = CGROUP_DELEGATED
+            .iter()
+            .copied()
+            .filter(|c| available.contains(c))
+            .collect();
+        if !want.is_empty() {
+            let line = crate::subtree_control_line(&available);
+            std::fs::write(root.join("cgroup.subtree_control"), &line)
+                .map_err(|e| PlatformError::Other(format!("subtree_control '{line}': {e}")))?;
+        }
+        Ok(())
     }
 
     fn kernel_cmdline(&self) -> Result<String> {
