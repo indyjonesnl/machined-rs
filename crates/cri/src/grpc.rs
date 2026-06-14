@@ -7,8 +7,9 @@ use hyper_util::rt::TokioIo;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
 
+use crate::pb::image_service_client::ImageServiceClient;
 use crate::pb::runtime_service_client::RuntimeServiceClient;
-use crate::pb::{StatusRequest, VersionRequest};
+use crate::pb::{ImageSpec, ImageStatusRequest, PullImageRequest, StatusRequest, VersionRequest};
 use crate::{CriClient, CriError, Result, RuntimeVersion};
 
 /// CRI over a unix socket. Connects per-probe (the socket may appear only after
@@ -39,6 +40,22 @@ impl GrpcCriClient {
             .await
             .map_err(|e| CriError::Connect(e.to_string()))?;
         Ok(RuntimeServiceClient::new(channel))
+    }
+
+    async fn connect_image(&self) -> Result<ImageServiceClient<Channel>> {
+        let path = self.socket.clone();
+        let channel = Endpoint::try_from("http://[::]:50051")
+            .map_err(|e| CriError::Connect(e.to_string()))?
+            .connect_with_connector(service_fn(move |_: Uri| {
+                let path = path.clone();
+                async move {
+                    let stream = tokio::net::UnixStream::connect(path).await?;
+                    Ok::<_, std::io::Error>(TokioIo::new(stream))
+                }
+            }))
+            .await
+            .map_err(|e| CriError::Connect(e.to_string()))?;
+        Ok(ImageServiceClient::new(channel))
     }
 }
 
@@ -72,5 +89,34 @@ impl CriClient for GrpcCriClient {
                     .any(|c| c.r#type == "RuntimeReady" && c.status)
             })
             .unwrap_or(false))
+    }
+
+    async fn image_present(&self, image: &str) -> Result<bool> {
+        let mut client = self.connect_image().await?;
+        let resp = client
+            .image_status(ImageStatusRequest {
+                image: Some(ImageSpec {
+                    image: image.to_string(),
+                }),
+                verbose: false,
+            })
+            .await
+            .map_err(|e| CriError::Rpc(e.to_string()))?
+            .into_inner();
+        Ok(resp.image.is_some())
+    }
+
+    async fn pull_image(&self, image: &str) -> Result<()> {
+        let mut client = self.connect_image().await?;
+        client
+            .pull_image(PullImageRequest {
+                image: Some(ImageSpec {
+                    image: image.to_string(),
+                }),
+                sandbox_config: None,
+            })
+            .await
+            .map_err(|e| CriError::Rpc(e.to_string()))?;
+        Ok(())
     }
 }

@@ -11,6 +11,7 @@ struct FakeState {
     version: Option<RuntimeVersion>,
     ready: bool,
     calls: usize,
+    images: std::collections::HashSet<String>,
 }
 
 #[derive(Default)]
@@ -37,6 +38,11 @@ impl FakeCriClient {
         self
     }
 
+    pub fn with_image(self, image: &str) -> Self {
+        self.state.lock().unwrap().images.insert(image.to_string());
+        self
+    }
+
     pub fn calls(&self) -> usize {
         self.state.lock().unwrap().calls
     }
@@ -60,6 +66,15 @@ impl CriClient for FakeCriClient {
         }
         Ok(s.ready)
     }
+
+    async fn image_present(&self, image: &str) -> Result<bool> {
+        Ok(self.state.lock().unwrap().images.contains(image))
+    }
+
+    async fn pull_image(&self, image: &str) -> Result<()> {
+        self.state.lock().unwrap().images.insert(image.to_string());
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -78,5 +93,17 @@ mod tests {
         let unreachable = FakeCriClient::new();
         assert!(unreachable.version().await.is_err());
         assert!(unreachable.ready().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn fake_image_presence_and_pull() {
+        let f = FakeCriClient::new()
+            .with_version("containerd", "2.0")
+            .with_image("busybox:1.36");
+        assert!(f.image_present("busybox:1.36").await.unwrap());
+        assert!(!f.image_present("nope:1").await.unwrap());
+        // pull makes a previously-absent image present.
+        f.pull_image("pulled:1").await.unwrap();
+        assert!(f.image_present("pulled:1").await.unwrap());
     }
 }
