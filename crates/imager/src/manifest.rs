@@ -77,6 +77,10 @@ kind = "apk"
         assert!(x86.iter().any(|a| a.name == "runc"
             && a.kind == "boot-binary"
             && a.rename.as_deref() == Some("runc")));
+        // M8b CNI: the containernetworking plugins tarball (x86-only).
+        assert!(x86
+            .iter()
+            .any(|a| a.name == "cni-plugins" && a.kind == "cni-plugins"));
         // The apk artifacts (kernel etc.) are still there.
         assert!(x86.iter().any(|a| a.kind == "apk"));
         // aarch64 section present with the same shape (apk kernel + arm64 runtime).
