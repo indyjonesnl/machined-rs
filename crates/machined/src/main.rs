@@ -3,6 +3,7 @@
 mod emergency;
 mod imageboot;
 mod pid1;
+mod runtime_images;
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -18,7 +19,7 @@ use machined_controllers::network::{
     AddressController, HostnameController, LinkController, NetworkConfigController,
     ResolverController, RouteController,
 };
-use machined_controllers::runtime::RuntimeHealthController;
+use machined_controllers::runtime::{PodController, RuntimeHealthController};
 use machined_controllers::time::TimeSyncController;
 use machined_pki::NodePki;
 use machined_platform::Platform;
@@ -253,6 +254,9 @@ async fn run_daemon() -> anyhow::Result<()> {
         {
             error!("boot partition mount: {e}");
         }
+        if let Err(e) = platform.delegate_cgroups() {
+            error!("cgroup delegation: {e}");
+        }
     }
 
     // Load config first so the controllers can be built from it (fall back to
@@ -311,12 +315,24 @@ async fn run_daemon() -> anyhow::Result<()> {
         provider.clone(),
     )));
 
+    runtime.register(Box::new(PodController::new(
+        build_cri(&provider.runtime().socket),
+        provider.clone(),
+    )));
+
     let rt_token = shutdown.clone();
     let rt_handle = tokio::spawn(async move {
         if let Err(e) = runtime.run(rt_token).await {
             error!("runtime error: {e}");
         }
     });
+
+    // Import pre-baked OCI archives into containerd before pods start. Gated so
+    // dev/test runs (not PID1, runtime disabled, or no pods) never shell `ctr`.
+    if std::process::id() == 1 && !provider.runtime().disabled && !provider.pods().is_empty() {
+        let socket = provider.runtime().socket.clone();
+        tokio::spawn(runtime_images::import_boot_images(socket));
+    }
 
     // Action channel: API handlers enqueue; the main loop below consumes one.
     let (api_action_tx, mut api_action_rx) = tokio::sync::mpsc::channel::<NodeAction>(1);
