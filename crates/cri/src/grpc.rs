@@ -12,7 +12,8 @@ use crate::pb::runtime_service_client::RuntimeServiceClient;
 use crate::pb::{
     ImageSpec, ImageStatusRequest, LinuxPodSandboxConfig, LinuxSandboxSecurityContext,
     ListPodSandboxRequest, NamespaceMode, NamespaceOption, PodSandboxConfig, PodSandboxFilter,
-    PodSandboxMetadata, PullImageRequest, RunPodSandboxRequest, StatusRequest, VersionRequest,
+    PodSandboxMetadata, PodSandboxState, PodSandboxStateValue, PullImageRequest,
+    RunPodSandboxRequest, StatusRequest, VersionRequest,
 };
 use crate::{CriClient, CriError, Result, RuntimeVersion};
 
@@ -172,7 +173,9 @@ impl CriClient for GrpcCriClient {
             .list_pod_sandbox(ListPodSandboxRequest {
                 filter: Some(PodSandboxFilter {
                     id: String::new(),
-                    state: None,
+                    state: Some(PodSandboxStateValue {
+                        state: PodSandboxState::SandboxReady as i32,
+                    }),
                     label_selector: std::collections::HashMap::from([(
                         "io.machined.pod".to_string(),
                         name.to_string(),
