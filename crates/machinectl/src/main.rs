@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Version => {
             let v = client.version(Empty {}).await?.into_inner();
-            println!("{}", v.version);
+            println!("version={} image_id={}", v.version, v.image_id);
         }
         Command::Get {
             resource_type,
