@@ -7,6 +7,7 @@ use crate::network::{
     AddressSpec, AddressStatus, HostnameSpec, LinkSpec, LinkStatus, ResolverSpec, RouteSpec,
     RouteStatus,
 };
+use crate::pod_status::PodStatus;
 use crate::runtime_status::RuntimeStatus;
 use crate::time::TimeStatus;
 
@@ -61,6 +62,7 @@ pub enum Resource {
     MountStatus(MountStatus),
     TimeStatus(TimeStatus),
     RuntimeStatus(RuntimeStatus),
+    PodStatus(PodStatus),
 }
 
 impl Resource {
@@ -83,6 +85,7 @@ impl Resource {
             Resource::MountStatus(_) => ResourceType::MountStatus,
             Resource::TimeStatus(_) => ResourceType::TimeStatus,
             Resource::RuntimeStatus(_) => ResourceType::RuntimeStatus,
+            Resource::PodStatus(_) => ResourceType::PodStatus,
         }
     }
 }

@@ -4,6 +4,7 @@
 pub mod block;
 pub mod metadata;
 pub mod network;
+pub mod pod_status;
 pub mod resource;
 pub mod runtime_status;
 pub mod time;
@@ -14,6 +15,7 @@ pub use network::{
     AddrCidr, AddrCidrParseError, AddressSpec, AddressStatus, HostnameSpec, LinkSpec, LinkStatus,
     ResolverSpec, RouteSpec, RouteStatus,
 };
+pub use pod_status::{PodPhase, PodStatus};
 pub use resource::{MachineConfigSpec, Resource, ResourceObject, ServiceState, ServiceStatusSpec};
 pub use runtime_status::RuntimeStatus;
 pub use time::TimeStatus;
