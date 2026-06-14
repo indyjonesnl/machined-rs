@@ -81,4 +81,7 @@ pub trait CriClient: Send + Sync {
     async fn find_container(&self, sandbox_id: &str, name: &str) -> Result<Option<String>>;
     /// Read a container's current state (CRI ContainerStatus).
     async fn container_state(&self, container_id: &str) -> Result<ContainerState>;
+    /// The sandbox's assigned IP (CRI PodSandboxStatus → status.network.ip).
+    /// None when the sandbox has no network status / host-network (empty ip).
+    async fn pod_ip(&self, sandbox_id: &str) -> Result<Option<String>>;
 }

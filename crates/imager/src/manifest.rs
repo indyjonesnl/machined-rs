@@ -18,7 +18,9 @@ pub struct Artifact {
     pub sha256: String,
     /// "apk" → initramfs rootfs; "boot-tarball" → /boot/bin (bin/* from a
     /// single .tar.gz); "boot-binary" → /boot/bin/<rename|name>;
-    /// "oci-image" → /boot/images/<rename|name> (a pre-baked OCI archive).
+    /// "oci-image" → /boot/images/<rename|name> (a pre-baked OCI archive);
+    /// "cni-plugins" → /boot/cni/bin/{bridge,host-local,loopback} (from a
+    /// cni-plugins-*.tgz).
     pub kind: String,
     /// For "boot-binary": the filename to stage as (e.g. runc). Ignored otherwise.
     #[serde(default)]
@@ -75,6 +77,10 @@ kind = "apk"
         assert!(x86.iter().any(|a| a.name == "runc"
             && a.kind == "boot-binary"
             && a.rename.as_deref() == Some("runc")));
+        // M8b CNI: the containernetworking plugins tarball (x86-only).
+        assert!(x86
+            .iter()
+            .any(|a| a.name == "cni-plugins" && a.kind == "cni-plugins"));
         // The apk artifacts (kernel etc.) are still there.
         assert!(x86.iter().any(|a| a.kind == "apk"));
         // aarch64 section present with the same shape (apk kernel + arm64 runtime).

@@ -3,7 +3,7 @@
 //! (which targets the initramfs rootfs) — these land on disk, not in RAM.
 
 use anyhow::Context;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 /// Guard: every component of an archive entry path must be Normal (no `..`,
 /// no absolute, no prefix) — same posture as apk extraction.
@@ -52,6 +52,49 @@ pub fn extract_boot_tarball(tgz: &Path, staging_bin: &Path) -> anyhow::Result<()
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut entry, &mut buf)?;
+        std::fs::write(&target, &buf).with_context(|| format!("write {}", target.display()))?;
+        set_exec(&target)?;
+    }
+    Ok(())
+}
+
+/// Extract the named CNI plugin binaries (flat entries like `./bridge`) from a
+/// `cni-plugins-*.tgz` into `staging_cni_bin`, mode 0755. Plugins not in
+/// `wanted` are skipped. Path-escape guarded like `extract_boot_tarball`.
+///
+/// # Errors
+/// Fails on I/O errors or an entry whose path escapes containment.
+pub fn extract_cni_plugins(
+    tgz: &Path,
+    staging_cni_bin: &Path,
+    wanted: &[&str],
+) -> anyhow::Result<()> {
+    let file = std::fs::File::open(tgz).with_context(|| format!("opening {}", tgz.display()))?;
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    std::fs::create_dir_all(staging_cni_bin)
+        .with_context(|| format!("create {}", staging_cni_bin.display()))?;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let raw = entry.path()?.into_owned();
+        // CNI tarball entries are `./bridge` etc. — strip the leading `./`
+        // (Component::CurDir) before the contains-only-Normal guard.
+        let path: PathBuf = raw
+            .components()
+            .filter(|c| !matches!(c, Component::CurDir))
+            .collect();
+        guard_contained(&path)?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !wanted.contains(&name) {
+            continue;
+        }
+        let target = staging_cni_bin.join(name);
         let mut buf = Vec::new();
         std::io::Read::read_to_end(&mut entry, &mut buf)?;
         std::fs::write(&target, &buf).with_context(|| format!("write {}", target.display()))?;
@@ -188,6 +231,49 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = std::fs::metadata(staging_bin.join("runc"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o755);
+        }
+    }
+
+    #[test]
+    fn cni_plugins_stages_wanted_binaries_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let tgz = dir.path().join("cni.tgz");
+        std::fs::write(
+            &tgz,
+            gzip(&tar_with(&[
+                ("./bridge", b"\x7fELF-bridge"),
+                ("./host-local", b"\x7fELF-hl"),
+                ("./loopback", b"\x7fELF-lo"),
+                ("./flannel", b"\x7fELF-fl"), // not wanted → skipped
+            ])),
+        )
+        .unwrap();
+        let cni_bin = dir.path().join("staging").join("cni").join("bin");
+        extract_cni_plugins(&tgz, &cni_bin, &["bridge", "host-local", "loopback"]).unwrap();
+        assert_eq!(
+            std::fs::read(cni_bin.join("bridge")).unwrap(),
+            b"\x7fELF-bridge"
+        );
+        assert_eq!(
+            std::fs::read(cni_bin.join("host-local")).unwrap(),
+            b"\x7fELF-hl"
+        );
+        assert_eq!(
+            std::fs::read(cni_bin.join("loopback")).unwrap(),
+            b"\x7fELF-lo"
+        );
+        assert!(
+            !cni_bin.join("flannel").exists(),
+            "non-wanted plugin skipped"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(cni_bin.join("bridge"))
                 .unwrap()
                 .permissions()
                 .mode();

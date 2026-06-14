@@ -14,6 +14,7 @@ pub struct PodStatus {
     pub name: String,
     pub phase: PodPhase,
     pub container_id: String,
+    pub pod_ip: String,
     pub message: String,
 }
 
@@ -27,6 +28,7 @@ mod tests {
             name: "hello".into(),
             phase: PodPhase::Running,
             container_id: "ctr-1".into(),
+            pod_ip: String::new(),
             message: String::new(),
         };
         assert_eq!(p.phase, PodPhase::Running);

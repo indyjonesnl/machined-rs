@@ -81,6 +81,10 @@ impl CriClient for FlipCri {
     ) -> Result<machined_cri::ContainerState, CriError> {
         Ok(machined_cri::ContainerState::Unknown)
     }
+
+    async fn pod_ip(&self, _sandbox_id: &str) -> Result<Option<String>, CriError> {
+        Ok(None)
+    }
 }
 
 fn svc_state(state: &State, id: &str) -> Option<ServiceState> {

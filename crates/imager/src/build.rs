@@ -22,6 +22,16 @@ const PKI_FILES: [&str; 4] = ["ca.pem", "ca.key", "server.pem", "server.key"];
 /// Subdir of the FAT staging tree where pre-baked OCI image archives land.
 const IMAGES_SUBDIR: &str = "images";
 
+/// Subdir of the FAT staging tree for CNI plugin binaries.
+const CNI_BIN_SUBDIR: &str = "cni/bin";
+/// The CNI plugins machined's default bridge conflist references.
+const CNI_WANTED_PLUGINS: &[&str] = &["bridge", "host-local", "loopback"];
+
+/// Subdir of the FAT staging tree for the CNI conflist.
+const CNI_CONF_SUBDIR: &str = "cni/conf";
+/// The default bridge conflist, embedded at build time (swappable default).
+const BRIDGE_CONFLIST: &str = include_str!("../assets/10-machined-bridge.conflist");
+
 /// Run the full image build: validate the config, fetch + extract every pinned
 /// apk, resolve the kernel module closure, assemble the initramfs, and write a
 /// GPT/FAT image (optionally copying a kernel/initramfs pair to `emit_boot`).
@@ -87,6 +97,10 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
                 std::fs::copy(&path, dst_dir.join(&name))
                     .with_context(|| format!("staging oci-image {name}"))?;
             }
+            "cni-plugins" => {
+                let dst = staging.join(CNI_BIN_SUBDIR);
+                crate::boot::extract_cni_plugins(&path, &dst, CNI_WANTED_PLUGINS)?;
+            }
             k => anyhow::bail!("unknown artifact kind {k} for {}", a.name),
         }
     }
@@ -129,6 +143,14 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
     let config_dst = staging.join("config.yaml");
     std::fs::write(&config_dst, &config_text)
         .with_context(|| format!("writing {}", config_dst.display()))?;
+    let cni_conf_dir = staging.join(CNI_CONF_SUBDIR);
+    std::fs::create_dir_all(&cni_conf_dir)
+        .with_context(|| format!("create {}", cni_conf_dir.display()))?;
+    std::fs::write(
+        cni_conf_dir.join("10-machined-bridge.conflist"),
+        BRIDGE_CONFLIST,
+    )
+    .with_context(|| "writing bridge conflist".to_string())?;
     if let Some(pki) = o.pki_dir {
         let dst = staging.join("pki");
         std::fs::create_dir_all(&dst).with_context(|| format!("creating {}", dst.display()))?;
@@ -270,6 +292,12 @@ kernel/fs/nls/nls_cp437.ko.gz:
 kernel/fs/nls/nls_iso8859_1.ko.gz:
 kernel/fs/nls/nls_utf8.ko.gz:
 kernel/fs/overlayfs/overlay.ko.gz:
+kernel/drivers/net/veth.ko.gz:
+kernel/net/bridge/bridge.ko.gz:
+kernel/net/bridge/br_netfilter.ko.gz:
+kernel/net/netfilter/nf_tables.ko.gz:
+kernel/net/netfilter/nf_nat.ko.gz:
+kernel/net/netfilter/nf_conntrack.ko.gz:
 ";
 
     /// All `.ko.gz` paths declared in MODULES_DEP (closure members) plus one
@@ -287,6 +315,12 @@ kernel/fs/overlayfs/overlay.ko.gz:
         "kernel/fs/nls/nls_iso8859_1.ko.gz",
         "kernel/fs/nls/nls_utf8.ko.gz",
         "kernel/fs/overlayfs/overlay.ko.gz",
+        "kernel/drivers/net/veth.ko.gz",
+        "kernel/net/bridge/bridge.ko.gz",
+        "kernel/net/bridge/br_netfilter.ko.gz",
+        "kernel/net/netfilter/nf_tables.ko.gz",
+        "kernel/net/netfilter/nf_nat.ko.gz",
+        "kernel/net/netfilter/nf_conntrack.ko.gz",
     ];
     const UNUSED_KO_GZ: &str = "kernel/net/unused.ko.gz";
 
@@ -373,6 +407,28 @@ kernel/fs/overlayfs/overlay.ko.gz:
         let pausetar_sha = hex::encode(Sha256::digest(&pausetar));
         let pausetar_url = "http://example/pause.tar".to_string();
 
+        let cnitgz = {
+            let mut b = Vec::new();
+            {
+                let mut t = tar::Builder::new(&mut b);
+                for (n, d) in [
+                    ("./bridge", &b"ELF-br"[..]),
+                    ("./host-local", b"ELF-hl"),
+                    ("./loopback", b"ELF-lo"),
+                ] {
+                    let mut h = tar::Header::new_gnu();
+                    h.set_size(d.len() as u64);
+                    h.set_mode(0o755);
+                    h.set_cksum();
+                    t.append_data(&mut h, n, d).unwrap();
+                }
+                t.finish().unwrap();
+            }
+            gzip(&b)
+        };
+        let cnitgz_sha = hex::encode(Sha256::digest(&cnitgz));
+        let cnitgz_url = "http://example/cni.tgz".to_string();
+
         let linux_url = "http://example/linux-virt.apk".to_string();
         let e2fs_url = "http://example/e2fsprogs.apk".to_string();
         let containerd_url = "http://example/containerd.tar.gz".to_string();
@@ -383,6 +439,7 @@ kernel/fs/overlayfs/overlay.ko.gz:
         map.insert(containerd_url.clone(), containerd);
         map.insert(runc_url.clone(), runc);
         map.insert(pausetar_url.clone(), pausetar);
+        map.insert(cnitgz_url.clone(), cnitgz);
 
         let pinned_linux_sha = linux_sha_override.unwrap_or(&linux_sha);
         let manifest = base.join("artifacts.toml");
@@ -421,6 +478,12 @@ url = "{pausetar_url}"
 sha256 = "{pausetar_sha}"
 kind = "oci-image"
 rename = "pause.tar"
+
+[[artifact.x86_64]]
+name = "cni-plugins"
+url = "{cnitgz_url}"
+sha256 = "{cnitgz_sha}"
+kind = "cni-plugins"
 "#
             ),
         )
@@ -565,6 +628,32 @@ rename = "pause.tar"
             "{img_names:?}"
         );
         assert_eq!(read_fat_file(&fs, "images/pause.tar"), b"OCI-ARCHIVE-PAUSE");
+
+        // cni-plugins kind stages the wanted plugins under /cni/bin on the FAT.
+        let cni = fs
+            .root_dir()
+            .open_dir("cni")
+            .unwrap()
+            .open_dir("bin")
+            .expect("cni/bin on FAT");
+        let cni_names: Vec<String> = cni
+            .iter()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n != "." && n != "..")
+            .collect();
+        for want in ["bridge", "host-local", "loopback"] {
+            assert!(cni_names.contains(&want.to_string()), "{cni_names:?}");
+        }
+        assert_eq!(read_fat_file(&fs, "cni/bin/bridge"), b"ELF-br");
+
+        // The bridge conflist is staged to /cni/conf on the FAT.
+        let conf = read_fat_file(&fs, "cni/conf/10-machined-bridge.conflist");
+        let conf_s = String::from_utf8_lossy(&conf);
+        assert!(conf_s.contains("\"type\": \"bridge\""), "{conf_s}");
+        assert!(
+            conf_s.contains("\"ipMasqBackend\": \"nftables\""),
+            "{conf_s}"
+        );
 
         // initramfs.img gunzips to a cpio with the expected payload.
         let initrd = gunzip(&read_fat_file(&fs, "initramfs.img"));

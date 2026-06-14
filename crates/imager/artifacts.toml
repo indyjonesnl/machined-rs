@@ -36,6 +36,8 @@ x86_64 = [
   # GitHub-release static binaries staged to /boot/bin (NOT Alpine apks → initramfs):
   { name = "containerd", url = "https://github.com/containerd/containerd/releases/download/v2.0.9/containerd-static-2.0.9-linux-amd64.tar.gz", sha256 = "6cd7dc915982271ab634193ad7746cf2c7ef07fb4f37cf6f662b2bdcb6678013", kind = "boot-tarball" },
   { name = "runc", url = "https://github.com/opencontainers/runc/releases/download/v1.4.3/runc.amd64", sha256 = "f6ae8efc0fa40079e1475e97cbe9d1bd3f106a28d6af78a11d9f1bd565515e60", kind = "boot-binary", rename = "runc" },
+  # CNI bridge/host-local/loopback plugins (amd64, nftables ipMasq backend) → /boot/cni/bin:
+  { name = "cni-plugins", url = "https://github.com/containernetworking/plugins/releases/download/v1.6.2/cni-plugins-linux-amd64-v1.6.2.tgz", sha256 = "b8e811578fb66023f90d2e238d80cec3bdfca4b44049af74c374d4fae0f9c090", kind = "cni-plugins" },
 ]
 
 # Source: Alpine v3.21 main/aarch64; arm64 GitHub-release static binaries. Same

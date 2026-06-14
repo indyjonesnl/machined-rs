@@ -105,15 +105,33 @@ fi
 
 # The PodController pulls the pre-baked busybox pod up via CRI. A running pod row:
 #   hello  name=hello phase=Running container_id=... message=
-echo "checking pod is Running (namespace runtime)..."
+echo "checking host-net pod is Running (namespace runtime)..."
 pod_deadline=$((SECONDS + 180))
+hello_ok=0
 while [ $SECONDS -lt $pod_deadline ]; do
   PODS=$(ctl get PodStatus --namespace runtime 2>/dev/null || true)
   if echo "$PODS" | grep -Eq 'name=hello .*phase=Running'; then
+    echo "$PODS"; hello_ok=1; break
+  fi
+  if ! kill -0 $QEMU 2>/dev/null; then echo "QEMU died"; tail -120 "$SERIAL"; exit 1; fi
+  sleep 2
+done
+if [ "$hello_ok" -ne 1 ]; then
+  echo "hello pod never reached Running:"; ctl get PodStatus --namespace runtime || true
+  tail -160 "$SERIAL"; exit 1
+fi
+
+# netpod is host_network:false → CNI bridge assigns it a 10.88.x address.
+# A running CNI pod row: netpod  name=netpod phase=Running container_id=... pod_ip=10.88.0.x message=
+echo "checking CNI pod has a bridge IP (namespace runtime)..."
+net_deadline=$((SECONDS + 180))
+while [ $SECONDS -lt $net_deadline ]; do
+  PODS=$(ctl get PodStatus --namespace runtime 2>/dev/null || true)
+  if echo "$PODS" | grep -Eq 'name=netpod .*phase=Running .*pod_ip=10\.88\.'; then
     echo "$PODS"; echo "BOOT TEST PASSED"; exit 0
   fi
   if ! kill -0 $QEMU 2>/dev/null; then echo "QEMU died"; tail -120 "$SERIAL"; exit 1; fi
   sleep 2
 done
-echo "pod never reached Running:"; ctl get PodStatus --namespace runtime || true
-tail -160 "$SERIAL"; exit 1
+echo "netpod never got a bridge IP:"; ctl get PodStatus --namespace runtime || true
+tail -200 "$SERIAL"; exit 1

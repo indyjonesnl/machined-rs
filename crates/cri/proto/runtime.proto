@@ -12,6 +12,7 @@ service RuntimeService {
   rpc StartContainer(StartContainerRequest) returns (StartContainerResponse) {}
   rpc ListContainers(ListContainersRequest) returns (ListContainersResponse) {}
   rpc ContainerStatus(ContainerStatusRequest) returns (ContainerStatusResponse) {}
+  rpc PodSandboxStatus(PodSandboxStatusRequest) returns (PodSandboxStatusResponse) {}
 }
 
 service ImageService {
@@ -96,3 +97,14 @@ message Image { string id = 1; repeated string repo_tags = 2; repeated string re
 message ImageStatusResponse { Image image = 1; }
 message PullImageRequest { ImageSpec image = 1; PodSandboxConfig sandbox_config = 3; }
 message PullImageResponse { string image_ref = 1; }
+
+// ---- pod sandbox status (network = pod IP; created_at=4/linux=6 skipped, unread by machined) ----
+message PodSandboxNetworkStatus { string ip = 1; }
+message PodSandboxStatus {
+  string id = 1;
+  PodSandboxMetadata metadata = 2;
+  PodSandboxState state = 3;
+  PodSandboxNetworkStatus network = 5;
+}
+message PodSandboxStatusRequest { string pod_sandbox_id = 1; bool verbose = 2; }
+message PodSandboxStatusResponse { PodSandboxStatus status = 1; }

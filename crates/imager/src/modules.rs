@@ -80,6 +80,14 @@ pub const VIRT_MODULES: &[&str] = &[
     "nls_utf8",
     // containerd's overlayfs snapshotter needs overlay.ko for image layers.
     "overlay",
+    // CNI bridge networking: veth pairs + the cni0 bridge, plus br_netfilter +
+    // the nftables NAT stack the bridge plugin's ipMasq backend programs.
+    "veth",
+    "bridge",
+    "br_netfilter",
+    "nf_tables",
+    "nf_nat",
+    "nf_conntrack",
 ];
 
 /// The Raspberry Pi (linux-rpi) initramfs module roots. EMPTY: the Pi kernel

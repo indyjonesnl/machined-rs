@@ -30,7 +30,13 @@ impl PodController {
     }
 }
 
-fn status_obj(name: &str, phase: PodPhase, container_id: &str, message: &str) -> ResourceObject {
+fn status_obj(
+    name: &str,
+    phase: PodPhase,
+    container_id: &str,
+    message: &str,
+    pod_ip: &str,
+) -> ResourceObject {
     ResourceObject::new(
         NS,
         name,
@@ -38,6 +44,7 @@ fn status_obj(name: &str, phase: PodPhase, container_id: &str, message: &str) ->
             name: name.to_string(),
             phase,
             container_id: container_id.to_string(),
+            pod_ip: pod_ip.to_string(),
             message: message.to_string(),
         }),
     )
@@ -93,6 +100,7 @@ impl Controller for PodController {
                     PodPhase::Pending,
                     "",
                     "runtime not ready",
+                    "",
                 ));
                 continue;
             }
@@ -108,30 +116,47 @@ impl PodController {
         // 1. image must be present (pre-imported on offline nodes).
         match self.cri.image_present(&p.image).await {
             Ok(true) => {}
-            Ok(false) => return status_obj(&p.name, PodPhase::Pending, "", "image not present"),
+            Ok(false) => {
+                return status_obj(&p.name, PodPhase::Pending, "", "image not present", "")
+            }
             Err(e) => {
                 warn!(pod = %p.name, error = %e, "image_present failed");
-                return status_obj(&p.name, PodPhase::Pending, "", "cri unreachable");
+                return status_obj(&p.name, PodPhase::Pending, "", "cri unreachable", "");
             }
         }
         // 2. sandbox (idempotent by name).
         let sandbox = match self.ensure_sandbox(p).await {
             Ok(id) => id,
-            Err(m) => return status_obj(&p.name, PodPhase::Pending, "", &m),
+            Err(m) => return status_obj(&p.name, PodPhase::Pending, "", &m, ""),
         };
         // 3. container (idempotent by name within the sandbox).
         let container = match self.ensure_container(&sandbox, p).await {
             Ok(id) => id,
-            Err(m) => return status_obj(&p.name, PodPhase::Pending, "", &m),
+            Err(m) => return status_obj(&p.name, PodPhase::Pending, "", &m, ""),
         };
         // 4. observe + report.
         match self.cri.container_state(&container).await {
-            Ok(ContainerState::Running) => status_obj(&p.name, PodPhase::Running, &container, ""),
-            Ok(ContainerState::Exited) => {
-                status_obj(&p.name, PodPhase::Failed, &container, "container exited")
+            Ok(ContainerState::Running) => {
+                // Best-effort: CNI may still be assigning; empty until it lands,
+                // refilled on the next 5s resync.
+                let ip = self
+                    .cri
+                    .pod_ip(&sandbox)
+                    .await
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                status_obj(&p.name, PodPhase::Running, &container, "", &ip)
             }
-            Ok(_) => status_obj(&p.name, PodPhase::Pending, &container, "starting"),
-            Err(e) => status_obj(&p.name, PodPhase::Pending, &container, &e.to_string()),
+            Ok(ContainerState::Exited) => status_obj(
+                &p.name,
+                PodPhase::Failed,
+                &container,
+                "container exited",
+                "",
+            ),
+            Ok(_) => status_obj(&p.name, PodPhase::Pending, &container, "starting", ""),
+            Err(e) => status_obj(&p.name, PodPhase::Pending, &container, &e.to_string(), ""),
         }
     }
 
@@ -297,5 +322,25 @@ mod tests {
         let st = pod_status(&state, "hello");
         assert_eq!(st.phase, PodPhase::Pending);
         assert_eq!(st.message, "image not present");
+    }
+
+    #[tokio::test]
+    async fn running_pod_reports_cni_ip() {
+        let cri = Arc::new(
+            FakeCriClient::new()
+                .with_version("c", "2")
+                .with_image("busybox:1.36")
+                .with_pod_ip("10.88.0.5"),
+        );
+        let state = State::new();
+        mark_ready(&state);
+        let ctx = ReconcileCtx {
+            state: state.clone(),
+        };
+        let mut c = PodController::new(cri, provider_with_pod(false));
+        c.reconcile(&ctx).await.unwrap();
+        let st = pod_status(&state, "hello");
+        assert_eq!(st.phase, PodPhase::Running);
+        assert_eq!(st.pod_ip, "10.88.0.5");
     }
 }
