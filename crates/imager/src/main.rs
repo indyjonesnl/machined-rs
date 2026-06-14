@@ -30,6 +30,9 @@ enum Command {
         /// Target architecture.
         #[arg(long, value_parser = ["x86_64", "aarch64", "aarch64-rpi"])]
         arch: String,
+        /// Image identity baked into the initramfs (/etc/machined/image-id), reported via the API.
+        #[arg(long, default_value = "dev")]
+        image_id: String,
         /// Path to the static machined binary (musl).
         #[arg(long)]
         machined: PathBuf,
@@ -73,6 +76,7 @@ fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Build {
             arch,
+            image_id,
             machined,
             config,
             out,
@@ -85,6 +89,7 @@ fn main() -> anyhow::Result<()> {
             &fetch::HttpFetcher,
             &build::BuildOpts {
                 arch: &arch,
+                image_id: &image_id,
                 machined: &machined,
                 config: &config,
                 out: &out,
