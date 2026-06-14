@@ -121,3 +121,40 @@ jobs:
           key: imager-artifacts-${{ hashFiles('crates/imager/artifacts.toml') }}
       - name: build Pi 3A+ image (no boot)
         run: make build-image-aarch64-rpi
+
+  boot-test-aarch64-rpi:
+    runs-on: ubuntu-latest
+    needs: check
+    timeout-minutes: 45
+    # Boots the aarch64-rpi image under qemu-system-aarch64 -M raspi3ap (the Pi
+    # 3A+ SoC model). NO --device /dev/kvm: cross-arch emulation is TCG. This
+    # goes beyond build-image-aarch64-rpi (FAT readback only) by exercising the
+    # SD controller (mmcblk0), the MBR read, and the vfat /boot mount on a
+    # Pi-shaped machine. It does NOT model the VideoCore firmware handoff
+    # (-kernel/-initrd stand in for it) — that is proven on real hardware.
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/indyjonesnl/machined-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: cache imager artifacts
+        uses: actions/cache@v4
+        with:
+          path: target/imager-cache
+          key: imager-artifacts-${{ hashFiles('crates/imager/artifacts.toml') }}
+      - name: boot test (aarch64-rpi, raspi3ap)
+        timeout-minutes: 35
+        run: make boot-test-aarch64-rpi
+      - name: upload serial log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-test-aarch64-rpi-serial-log
+          path: target/boot-test-rpi/serial.log
+          if-no-files-found: ignore
