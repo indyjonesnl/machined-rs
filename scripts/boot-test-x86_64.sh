@@ -16,7 +16,7 @@ SERIAL=$WORK/serial.log
 MACHINED=$TARGET_DIR/x86_64-unknown-linux-musl/release/machined
 IMAGER=$TARGET_DIR/release/machined-imager
 CTL=$TARGET_DIR/release/machinectl
-TIMEOUT=${BOOT_TEST_TIMEOUT:-150}
+TIMEOUT=${BOOT_TEST_TIMEOUT:-240}
 # Port 50000 may be busy on a dev host; override with BOOT_TEST_PORT.
 PORT=${BOOT_TEST_PORT:-50000}
 
@@ -89,13 +89,31 @@ fi
 
 echo "checking runtime readiness (namespace runtime)..."
 rt_deadline=$((SECONDS + 120))
+runtime_ok=0
 while [ $SECONDS -lt $rt_deadline ]; do
   RT=$(ctl get RuntimeStatus --namespace runtime 2>/dev/null || true)
   if echo "$RT" | grep -Eq 'ready=true'; then
-    echo "$RT"; echo "BOOT TEST PASSED"; exit 0
+    echo "$RT"; runtime_ok=1; break
   fi
-  if ! kill -0 $QEMU 2>/dev/null; then echo "QEMU died"; tail -80 "$SERIAL"; exit 1; fi
+  if ! kill -0 $QEMU 2>/dev/null; then echo "QEMU died"; tail -120 "$SERIAL"; exit 1; fi
   sleep 2
 done
-echo "runtime never became ready:"; ctl get RuntimeStatus --namespace runtime || true
-tail -120 "$SERIAL"; exit 1
+if [ "$runtime_ok" -ne 1 ]; then
+  echo "runtime never became ready:"; ctl get RuntimeStatus --namespace runtime || true
+  tail -120 "$SERIAL"; exit 1
+fi
+
+# The PodController pulls the pre-baked busybox pod up via CRI. A running pod row:
+#   hello  name=hello phase=Running container_id=... message=
+echo "checking pod is Running (namespace runtime)..."
+pod_deadline=$((SECONDS + 180))
+while [ $SECONDS -lt $pod_deadline ]; do
+  PODS=$(ctl get PodStatus --namespace runtime 2>/dev/null || true)
+  if echo "$PODS" | grep -Eq 'name=hello .*phase=Running'; then
+    echo "$PODS"; echo "BOOT TEST PASSED"; exit 0
+  fi
+  if ! kill -0 $QEMU 2>/dev/null; then echo "QEMU died"; tail -120 "$SERIAL"; exit 1; fi
+  sleep 2
+done
+echo "pod never reached Running:"; ctl get PodStatus --namespace runtime || true
+tail -160 "$SERIAL"; exit 1
