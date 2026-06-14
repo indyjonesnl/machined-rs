@@ -19,6 +19,9 @@ pub struct BuildOpts<'a> {
 /// The four server PKI files copied onto the boot partition.
 const PKI_FILES: [&str; 4] = ["ca.pem", "ca.key", "server.pem", "server.key"];
 
+/// Subdir of the FAT staging tree where pre-baked OCI image archives land.
+const IMAGES_SUBDIR: &str = "images";
+
 /// Run the full image build: validate the config, fetch + extract every pinned
 /// apk, resolve the kernel module closure, assemble the initramfs, and write a
 /// GPT/FAT image (optionally copying a kernel/initramfs pair to `emit_boot`).
@@ -75,6 +78,14 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
             "boot-binary" => {
                 let name = a.rename.clone().unwrap_or_else(|| a.name.clone());
                 crate::boot::copy_boot_binary(&path, &staging_bin, &name)?;
+            }
+            "oci-image" => {
+                let name = a.rename.clone().unwrap_or_else(|| a.name.clone());
+                let dst_dir = staging.join(IMAGES_SUBDIR);
+                std::fs::create_dir_all(&dst_dir)
+                    .with_context(|| format!("create {}", dst_dir.display()))?;
+                std::fs::copy(&path, dst_dir.join(&name))
+                    .with_context(|| format!("staging oci-image {name}"))?;
             }
             k => anyhow::bail!("unknown artifact kind {k} for {}", a.name),
         }
@@ -358,6 +369,10 @@ kernel/fs/overlayfs/overlay.ko.gz:
         let containerd_sha = hex::encode(Sha256::digest(&containerd));
         let runc_sha = hex::encode(Sha256::digest(&runc));
 
+        let pausetar = b"OCI-ARCHIVE-PAUSE".to_vec();
+        let pausetar_sha = hex::encode(Sha256::digest(&pausetar));
+        let pausetar_url = "http://example/pause.tar".to_string();
+
         let linux_url = "http://example/linux-virt.apk".to_string();
         let e2fs_url = "http://example/e2fsprogs.apk".to_string();
         let containerd_url = "http://example/containerd.tar.gz".to_string();
@@ -367,6 +382,7 @@ kernel/fs/overlayfs/overlay.ko.gz:
         map.insert(e2fs_url.clone(), e2fs);
         map.insert(containerd_url.clone(), containerd);
         map.insert(runc_url.clone(), runc);
+        map.insert(pausetar_url.clone(), pausetar);
 
         let pinned_linux_sha = linux_sha_override.unwrap_or(&linux_sha);
         let manifest = base.join("artifacts.toml");
@@ -398,6 +414,13 @@ url = "{runc_url}"
 sha256 = "{runc_sha}"
 kind = "boot-binary"
 rename = "runc"
+
+[[artifact.x86_64]]
+name = "pause-image"
+url = "{pausetar_url}"
+sha256 = "{pausetar_sha}"
+kind = "oci-image"
+rename = "pause.tar"
 "#
             ),
         )
@@ -529,6 +552,16 @@ rename = "runc"
         );
         assert_eq!(read_fat_file(&fs, "bin/containerd"), b"ELF-c");
         assert_eq!(read_fat_file(&fs, "bin/runc"), b"ELF-runc");
+
+        // oci-image kind stages the archive under /images on the FAT.
+        let images = fs.root_dir().open_dir("images").expect("images dir on FAT");
+        let img_names: Vec<String> = images
+            .iter()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n != "." && n != "..")
+            .collect();
+        assert!(img_names.contains(&"pause.tar".to_string()), "{img_names:?}");
+        assert_eq!(read_fat_file(&fs, "images/pause.tar"), b"OCI-ARCHIVE-PAUSE");
 
         // initramfs.img gunzips to a cpio with the expected payload.
         let initrd = gunzip(&read_fat_file(&fs, "initramfs.img"));
