@@ -30,6 +30,15 @@ pub struct RuntimeVersion {
     pub runtime_version: String,
 }
 
+/// What machined needs to start a pod sandbox. Vendor-neutral (no pb:: types).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PodSpec {
+    pub name: String,
+    pub uid: String,
+    /// true → the sandbox shares the node network namespace (no CNI).
+    pub host_network: bool,
+}
+
 /// Health-probe view of a CRI runtime.
 #[async_trait]
 pub trait CriClient: Send + Sync {
@@ -42,4 +51,8 @@ pub trait CriClient: Send + Sync {
     /// Pull an image by ref (CRI PullImage). Offline nodes pre-import instead;
     /// this is the fallback path when a registry is reachable.
     async fn pull_image(&self, image: &str) -> Result<()>;
+    /// Create a pod sandbox; returns its id (CRI RunPodSandbox).
+    async fn run_pod_sandbox(&self, pod: &PodSpec) -> Result<String>;
+    /// Find a READY sandbox whose metadata name == `name`; the labelled id, if any.
+    async fn find_sandbox(&self, name: &str) -> Result<Option<String>>;
 }

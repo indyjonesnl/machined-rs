@@ -9,7 +9,11 @@ use tower::service_fn;
 
 use crate::pb::image_service_client::ImageServiceClient;
 use crate::pb::runtime_service_client::RuntimeServiceClient;
-use crate::pb::{ImageSpec, ImageStatusRequest, PullImageRequest, StatusRequest, VersionRequest};
+use crate::pb::{
+    ImageSpec, ImageStatusRequest, LinuxPodSandboxConfig, LinuxSandboxSecurityContext,
+    ListPodSandboxRequest, NamespaceMode, NamespaceOption, PodSandboxConfig, PodSandboxFilter,
+    PodSandboxMetadata, PullImageRequest, RunPodSandboxRequest, StatusRequest, VersionRequest,
+};
 use crate::{CriClient, CriError, Result, RuntimeVersion};
 
 /// CRI over a unix socket. Connects per-probe (the socket may appear only after
@@ -118,5 +122,66 @@ impl CriClient for GrpcCriClient {
             .await
             .map_err(|e| CriError::Rpc(e.to_string()))?;
         Ok(())
+    }
+
+    async fn run_pod_sandbox(&self, pod: &crate::PodSpec) -> Result<String> {
+        let mut client = self.connect().await?;
+        let net = if pod.host_network {
+            NamespaceMode::Node
+        } else {
+            NamespaceMode::Pod
+        } as i32;
+        let cfg = PodSandboxConfig {
+            metadata: Some(PodSandboxMetadata {
+                name: pod.name.clone(),
+                uid: pod.uid.clone(),
+                namespace: "default".into(),
+                attempt: 0,
+            }),
+            hostname: pod.name.clone(),
+            log_directory: String::new(),
+            labels: std::collections::HashMap::from([(
+                "io.machined.pod".to_string(),
+                pod.name.clone(),
+            )]),
+            linux: Some(LinuxPodSandboxConfig {
+                cgroup_parent: String::new(),
+                security_context: Some(LinuxSandboxSecurityContext {
+                    namespace_options: Some(NamespaceOption {
+                        network: net,
+                        pid: 0,
+                        ipc: 0,
+                    }),
+                }),
+            }),
+        };
+        let resp = client
+            .run_pod_sandbox(RunPodSandboxRequest {
+                config: Some(cfg),
+                runtime_handler: String::new(),
+            })
+            .await
+            .map_err(|e| CriError::Rpc(e.to_string()))?
+            .into_inner();
+        Ok(resp.pod_sandbox_id)
+    }
+
+    async fn find_sandbox(&self, name: &str) -> Result<Option<String>> {
+        let mut client = self.connect().await?;
+        let resp = client
+            .list_pod_sandbox(ListPodSandboxRequest {
+                filter: Some(PodSandboxFilter {
+                    id: String::new(),
+                    state: None,
+                    label_selector: std::collections::HashMap::from([(
+                        "io.machined.pod".to_string(),
+                        name.to_string(),
+                    )]),
+                }),
+            })
+            .await
+            .map_err(|e| CriError::Rpc(e.to_string()))?
+            .into_inner();
+        Ok(resp.items.into_iter().next().map(|s| s.id))
     }
 }

@@ -12,6 +12,8 @@ struct FakeState {
     ready: bool,
     calls: usize,
     images: std::collections::HashSet<String>,
+    next_id: usize,
+    sandboxes: Vec<(String, String)>, // (id, name)
 }
 
 #[derive(Default)]
@@ -46,6 +48,10 @@ impl FakeCriClient {
     pub fn calls(&self) -> usize {
         self.state.lock().unwrap().calls
     }
+
+    pub fn sandbox_count(&self) -> usize {
+        self.state.lock().unwrap().sandboxes.len()
+    }
 }
 
 #[async_trait]
@@ -74,6 +80,25 @@ impl CriClient for FakeCriClient {
     async fn pull_image(&self, image: &str) -> Result<()> {
         self.state.lock().unwrap().images.insert(image.to_string());
         Ok(())
+    }
+
+    async fn run_pod_sandbox(&self, pod: &crate::PodSpec) -> Result<String> {
+        let mut s = self.state.lock().unwrap();
+        s.next_id += 1;
+        let id = format!("sandbox-{}", s.next_id);
+        s.sandboxes.push((id.clone(), pod.name.clone()));
+        Ok(id)
+    }
+
+    async fn find_sandbox(&self, name: &str) -> Result<Option<String>> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .sandboxes
+            .iter()
+            .find(|(_, n)| n == name)
+            .map(|(id, _)| id.clone()))
     }
 }
 
@@ -105,5 +130,22 @@ mod tests {
         // pull makes a previously-absent image present.
         f.pull_image("pulled:1").await.unwrap();
         assert!(f.image_present("pulled:1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn fake_sandbox_create_is_idempotent_by_name() {
+        let f = FakeCriClient::new().with_version("containerd", "2.0");
+        let spec = crate::PodSpec {
+            name: "hello".into(),
+            uid: "u-hello".into(),
+            host_network: true,
+        };
+        assert!(f.find_sandbox("hello").await.unwrap().is_none());
+        let id = f.run_pod_sandbox(&spec).await.unwrap();
+        assert_eq!(
+            f.find_sandbox("hello").await.unwrap().as_deref(),
+            Some(id.as_str())
+        );
+        assert_eq!(f.sandbox_count(), 1);
     }
 }
