@@ -4,6 +4,7 @@ mod emergency;
 mod imageboot;
 mod pid1;
 mod runtime_images;
+mod upgrade;
 
 use std::net::SocketAddr;
 use std::path::Path;
