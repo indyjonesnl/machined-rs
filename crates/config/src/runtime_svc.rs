@@ -55,6 +55,10 @@ state = "/run/containerd"
       [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
         SystemdCgroup = false
         BinaryName = "/boot/bin/runc"
+
+  [plugins.'io.containerd.cri.v1.runtime'.cni]
+    bin_dir = "/boot/cni/bin"
+    conf_dir = "/boot/cni/conf"
 "#,
         socket = rt.socket,
         pause = PAUSE_IMAGE
@@ -171,6 +175,21 @@ mod tests {
         let toml_str = containerd_config_toml(&RuntimeSection::default());
         assert!(
             toml_str.contains(&format!("sandbox_image = \"{PAUSE_IMAGE}\"")),
+            "{toml_str}"
+        );
+        // still valid TOML.
+        toml::from_str::<toml::Value>(&toml_str).expect("valid TOML");
+    }
+
+    #[test]
+    fn config_sets_cni_dirs() {
+        let toml_str = containerd_config_toml(&RuntimeSection::default());
+        assert!(
+            toml_str.contains("bin_dir = \"/boot/cni/bin\""),
+            "{toml_str}"
+        );
+        assert!(
+            toml_str.contains("conf_dir = \"/boot/cni/conf\""),
             "{toml_str}"
         );
         // still valid TOML.
