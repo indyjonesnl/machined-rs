@@ -18,7 +18,9 @@ pub struct Artifact {
     pub sha256: String,
     /// "apk" → initramfs rootfs; "boot-tarball" → /boot/bin (bin/* from a
     /// single .tar.gz); "boot-binary" → /boot/bin/<rename|name>;
-    /// "oci-image" → /boot/images/<rename|name> (a pre-baked OCI archive).
+    /// "oci-image" → /boot/images/<rename|name> (a pre-baked OCI archive);
+    /// "cni-plugins" → /boot/cni/bin/{bridge,host-local,loopback} (from a
+    /// cni-plugins-*.tgz).
     pub kind: String,
     /// For "boot-binary": the filename to stage as (e.g. runc). Ignored otherwise.
     #[serde(default)]
