@@ -30,6 +30,7 @@ pub type Result<T> = std::result::Result<T, PlatformError>;
 pub const MS_RDONLY: u64 = 0x1;
 pub const MS_NOSUID: u64 = 0x2;
 pub const MS_NODEV: u64 = 0x4;
+pub const MS_REMOUNT: u64 = 0x20;
 
 /// cgroup-v2 unified hierarchy mount point.
 pub const CGROUP_ROOT: &str = "/sys/fs/cgroup";
@@ -89,6 +90,10 @@ use std::path::Path;
 /// Abstraction over the privileged operations early boot needs.
 pub trait Platform: Send + Sync {
     fn mount(&self, spec: &MountSpec) -> Result<()>;
+    /// Remount an already-mounted target read-write (MS_REMOUNT|original flags).
+    fn remount_rw(&self, target: &str) -> Result<()>;
+    /// Remount an already-mounted target read-only.
+    fn remount_ro(&self, target: &str) -> Result<()>;
     /// Load a kernel module from an absolute `.ko` path. Already-loaded is Ok.
     fn load_module(&self, path: &Path) -> Result<()>;
     fn set_sysctl(&self, key: &str, value: &str) -> Result<()>;

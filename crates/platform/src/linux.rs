@@ -53,6 +53,34 @@ impl Platform for LinuxPlatform {
         })
     }
 
+    fn remount_rw(&self, target: &str) -> Result<()> {
+        mount(
+            None::<&str>,
+            target,
+            None::<&str>,
+            MsFlags::MS_REMOUNT,
+            None::<&str>,
+        )
+        .map_err(|e| PlatformError::Mount {
+            target: target.to_string(),
+            message: format!("remount rw: {e}"),
+        })
+    }
+
+    fn remount_ro(&self, target: &str) -> Result<()> {
+        mount(
+            None::<&str>,
+            target,
+            None::<&str>,
+            MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
+            None::<&str>,
+        )
+        .map_err(|e| PlatformError::Mount {
+            target: target.to_string(),
+            message: format!("remount ro: {e}"),
+        })
+    }
+
     fn load_module(&self, path: &Path) -> Result<()> {
         let file = fs::File::open(path)?;
         match nix::kmod::finit_module(&file, c"", nix::kmod::ModuleInitFlags::empty()) {

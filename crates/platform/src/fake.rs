@@ -8,6 +8,8 @@ use crate::{MountSpec, Platform, PlatformError, Result};
 #[derive(Debug, Default)]
 pub struct Recorded {
     pub mounts: Vec<MountSpec>,
+    /// Remount calls as `(target, rw)` where `rw == true` is remount read-write.
+    pub remounts: Vec<(String, bool)>,
     pub unmounts: Vec<String>,
     /// Absolute `.ko` paths passed to `load_module`, in call order.
     pub modules: Vec<String>,
@@ -59,6 +61,22 @@ impl FakePlatform {
 impl Platform for FakePlatform {
     fn mount(&self, spec: &MountSpec) -> Result<()> {
         self.recorded.lock().unwrap().mounts.push(spec.clone());
+        Ok(())
+    }
+    fn remount_rw(&self, target: &str) -> Result<()> {
+        self.recorded
+            .lock()
+            .unwrap()
+            .remounts
+            .push((target.into(), true));
+        Ok(())
+    }
+    fn remount_ro(&self, target: &str) -> Result<()> {
+        self.recorded
+            .lock()
+            .unwrap()
+            .remounts
+            .push((target.into(), false));
         Ok(())
     }
     fn load_module(&self, path: &Path) -> Result<()> {
