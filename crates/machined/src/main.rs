@@ -1,9 +1,5 @@
 //! machined — PID 1 / machine-management daemon entrypoint.
 
-// Consumers (SdBootBackend impl + upgrade-flow wiring) land in Task 4 within
-// this crate; until then the trait/Slot helpers are unused and would trip
-// `dead_code` under CI's `-D warnings`.
-#[allow(dead_code)]
 mod bootloader;
 mod emergency;
 mod imageboot;
@@ -158,7 +154,6 @@ enum FinalAction {
     Reboot,
     Poweroff,
     Reset,
-    Kexec,
 }
 
 /// A final syscall (reboot/poweroff) failed: PID1 must never exit. Enter the
@@ -413,6 +408,18 @@ async fn run_daemon() -> anyhow::Result<()> {
 
     let state_for_reset = state.clone();
     let state_for_upgrade = state.clone();
+
+    // M9b-1: the A/B boot backend. The ESP is mounted at /boot; the running slot
+    // comes from /proc/cmdline's machined.slot= token (parse_slot, default A).
+    let upgrade_backend: std::sync::Arc<dyn bootloader::BootloaderBackend> = {
+        let cmdline = std::fs::read_to_string("/proc/cmdline").unwrap_or_default();
+        std::sync::Arc::new(bootloader::SdBootBackend::new(
+            "/boot",
+            platform.clone(),
+            &cmdline,
+        ))
+    };
+
     let ctx = SequencerCtx {
         state,
         platform: platform.clone(),
@@ -439,10 +446,18 @@ async fn run_daemon() -> anyhow::Result<()> {
             Some(NodeAction::Shutdown) => break FinalAction::Poweroff,
             Some(NodeAction::Reset) => break FinalAction::Reset,
             Some(NodeAction::Upgrade { url, sha256 }) => {
-                // Prepare BEFORE committing to shutdown: a failed download /
-                // verify / kexec-load leaves the node running on the current image.
-                match upgrade::prepare(&state_for_upgrade, platform.as_ref(), &url, &sha256).await {
-                    Ok(()) => break FinalAction::Kexec,
+                // Stage the new image to the inactive A/B slot + flip the boot
+                // pointer BEFORE committing to shutdown: a failed download/verify/
+                // stage leaves the node running on the current slot.
+                match upgrade::prepare_disk(
+                    &state_for_upgrade,
+                    upgrade_backend.as_ref(),
+                    &url,
+                    &sha256,
+                )
+                .await
+                {
+                    Ok(()) => break FinalAction::Reboot, // cold reboot into the new slot
                     Err(e) => {
                         error!("upgrade aborted (node stays up): {e}");
                         continue;
@@ -496,13 +511,6 @@ async fn run_daemon() -> anyhow::Result<()> {
             perform_reset(&state_for_reset, block_for_reset.as_ref()).await;
             if let Err(e) = platform.reboot() {
                 error!("reboot failed: {e}");
-                park_after_failed_final(&platform, &e).await;
-            }
-        }
-        FinalAction::Kexec => {
-            info!("upgrade: booting the new image via kexec");
-            if let Err(e) = platform.reboot_kexec() {
-                error!("kexec reboot failed: {e}");
                 park_after_failed_final(&platform, &e).await;
             }
         }

@@ -1,15 +1,15 @@
 //! OS upgrade preparation: download an image bundle, verify its sha256, extract
-//! the kernel+initramfs, and load them into the kexec buffer — all BEFORE the
-//! daemon commits to shutting down, so a failed upgrade leaves the node running.
+//! the kernel+initramfs, stage them into the inactive A/B slot on disk, and flip
+//! the boot pointer — all BEFORE the daemon commits to shutting down, so a failed
+//! upgrade leaves the node running on the current slot.
 
 use std::path::{Path, PathBuf};
 
 use crate::bootloader::BootloaderBackend;
-use machined_platform::Platform;
 use machined_resources::{Resource, ResourceObject, ResourceType, UpgradePhase, UpgradeStatus};
 use machined_runtime_core::{reconcile_owned, State};
 use sha2::{Digest, Sha256};
-use tracing::{error, info};
+use tracing::info;
 
 const NS: &str = "runtime";
 const OWNER: &str = "upgrade";
@@ -78,63 +78,11 @@ fn http_get(url: &str) -> anyhow::Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Download + verify + extract + kexec_load. On success the new image is in the
-/// kexec buffer (caller proceeds to shutdown + reboot_kexec). On ANY failure it
-/// publishes UpgradeStatus=Failed and returns Err (caller keeps the node up).
-pub async fn prepare(
-    state: &State,
-    platform: &dyn Platform,
-    url: &str,
-    sha256: &str,
-) -> anyhow::Result<()> {
-    publish(state, UpgradePhase::Downloading, url);
-    let url_owned = url.to_string();
-    let bytes = match tokio::task::spawn_blocking(move || http_get(&url_owned)).await? {
-        Ok(b) => b,
-        Err(e) => {
-            publish(state, UpgradePhase::Failed, &e.to_string());
-            return Err(e);
-        }
-    };
-
-    publish(state, UpgradePhase::Verifying, "");
-    let got = sha256_hex(&bytes);
-    if !got.eq_ignore_ascii_case(sha256) {
-        let msg = format!("sha256 mismatch: got {got}, want {sha256}");
-        publish(state, UpgradePhase::Failed, &msg);
-        anyhow::bail!(msg);
-    }
-
-    let dir = Path::new(STAGE_DIR);
-    let (kernel, initrd) = match extract_bundle(&bytes, dir) {
-        Ok(v) => v,
-        Err(e) => {
-            publish(state, UpgradePhase::Failed, &e.to_string());
-            return Err(e);
-        }
-    };
-
-    let cmdline = platform
-        .kernel_cmdline()
-        .unwrap_or_else(|_| "console=ttyS0".to_string());
-    if let Err(e) = platform.kexec_load(&kernel, &initrd, cmdline.trim()) {
-        publish(state, UpgradePhase::Failed, &e.to_string());
-        error!("kexec_load failed: {e}");
-        return Err(anyhow::anyhow!("kexec_load: {e}"));
-    }
-    info!("upgrade image loaded into kexec buffer");
-    publish(state, UpgradePhase::Loaded, "");
-    Ok(())
-}
-
 /// Verify + extract `bytes` (a bundle.tgz) into `dir`, stage the new
 /// kernel+initramfs into the inactive A/B slot via `backend`, and flip the boot
 /// pointer. Publishes UpgradeStatus along the way; on ANY failure publishes
 /// Failed and returns Err (caller keeps the node up). On success the node is
 /// ready to COLD-reboot into the freshly-staged slot.
-// Wired into main.rs in Task 6 (alongside SdBootBackend); unused until then and
-// would trip `dead_code` under CI's `-D warnings`. Mirrors bootloader.rs.
-#[allow(dead_code)]
 pub async fn stage_and_commit(
     state: &State,
     backend: &dyn BootloaderBackend,
@@ -178,7 +126,6 @@ pub async fn stage_and_commit(
 /// Download the bundle from `url`, then stage+commit it into STAGE_DIR (see
 /// [`stage_and_commit`]). On success the node is ready to COLD-reboot into the
 /// new slot.
-#[allow(dead_code)]
 pub async fn prepare_disk(
     state: &State,
     backend: &dyn BootloaderBackend,
@@ -212,9 +159,6 @@ mod tests {
         fail_set_active: bool,
     }
     impl crate::bootloader::BootloaderBackend for StubBackend {
-        fn current_slot(&self) -> Slot {
-            Slot::A
-        }
         fn stage_inactive(&self, _k: &Path, _i: &Path) -> anyhow::Result<Slot> {
             *self.staged.lock().unwrap() = Some(Slot::B);
             Ok(Slot::B)

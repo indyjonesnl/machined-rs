@@ -52,8 +52,6 @@ pub fn parse_slot(cmdline: &str) -> Slot {
 
 /// Backend over the on-disk bootloader. `esp` is the mounted ESP root (/boot).
 pub trait BootloaderBackend {
-    /// Which slot the running kernel booted from.
-    fn current_slot(&self) -> Slot;
     /// Write kernel+initramfs into the inactive slot dir on the ESP; return it.
     fn stage_inactive(&self, kernel: &Path, initrd: &Path) -> anyhow::Result<Slot>;
     /// Flip the boot pointer (loader.conf default) to `slot`.
@@ -84,10 +82,6 @@ impl SdBootBackend {
 }
 
 impl BootloaderBackend for SdBootBackend {
-    fn current_slot(&self) -> Slot {
-        self.current
-    }
-
     fn stage_inactive(&self, kernel: &Path, initrd: &Path) -> anyhow::Result<Slot> {
         let slot = self.current.other();
         let esp = self.esp.to_string_lossy().to_string();
