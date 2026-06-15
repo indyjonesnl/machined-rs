@@ -15,6 +15,7 @@ mod manifest;
 mod modules;
 mod pki;
 mod rpi;
+mod sdboot;
 
 #[derive(Parser)]
 #[command(name = "machined-imager", version)]

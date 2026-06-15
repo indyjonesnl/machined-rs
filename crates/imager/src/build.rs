@@ -174,6 +174,15 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
                 .with_context(|| format!("copying PKI file {f}"))?;
         }
     }
+    // M9b-1: GPT (UEFI) arches boot from disk via systemd-boot in an A/B layout.
+    // The Pi (MBR) keeps the flat firmware-loaded layout.
+    if cfg.scheme == crate::arch::PartScheme::Gpt {
+        let cmdline = match o.arch {
+            "aarch64" => "console=ttyAMA0",
+            _ => "console=ttyS0",
+        };
+        crate::sdboot::assemble(&staging, cmdline)?;
+    }
     image::write_image(o.out, o.size, &staging, cfg.scheme)?;
     if let Some(dir) = o.emit_boot {
         std::fs::create_dir_all(dir)
@@ -602,16 +611,37 @@ kind = "cni-plugins"
 
         assert!(f.out.exists(), "image must exist");
         let (names, fs) = open_fat(&f.out);
-        for want in ["vmlinuz", "initramfs.img", "config.yaml", "pki"] {
+        // x86_64 is a GPT arch: the systemd-boot A/B layout moves the kernel +
+        // initramfs under /A and adds /loader; config.yaml + pki stay at root.
+        for want in ["A", "loader", "config.yaml", "pki"] {
             assert!(
                 names.contains(&want.to_string()),
                 "FAT root missing {want}: {names:?}"
             );
         }
+        assert!(
+            !names.contains(&"vmlinuz".to_string()),
+            "vmlinuz must move into /A for GPT arches: {names:?}"
+        );
 
-        // vmlinuz content and config exact text.
-        assert_eq!(read_fat_file(&fs, "vmlinuz"), b"KERNEL");
+        // Kernel + initramfs land in slot A; config exact text at the root.
+        assert_eq!(read_fat_file(&fs, "A/vmlinuz"), b"KERNEL");
         assert_eq!(read_fat_file(&fs, "config.yaml"), b"machine: {}\n");
+
+        // systemd-boot loader: default=a, headless, A/B entries pointing at /A,/B.
+        assert_eq!(
+            read_fat_file(&fs, "loader/loader.conf"),
+            b"default a\ntimeout 0\n"
+        );
+        let a_entry = String::from_utf8(read_fat_file(&fs, "loader/entries/a.conf")).unwrap();
+        assert!(a_entry.contains("linux /A/vmlinuz"), "{a_entry}");
+        assert!(a_entry.contains("machined.slot=a"), "{a_entry}");
+        assert!(a_entry.contains("console=ttyS0"), "{a_entry}");
+        let b_entry = String::from_utf8(read_fat_file(&fs, "loader/entries/b.conf")).unwrap();
+        assert!(
+            b_entry.contains("linux /B/vmlinuz") && b_entry.contains("machined.slot=b"),
+            "{b_entry}"
+        );
 
         // PKI: all four server files present.
         for f4 in PKI_FILES {
@@ -679,8 +709,8 @@ kind = "cni-plugins"
             "{conf_s}"
         );
 
-        // initramfs.img gunzips to a cpio with the expected payload.
-        let initrd = gunzip(&read_fat_file(&fs, "initramfs.img"));
+        // initramfs.img (in slot A) gunzips to a cpio with the expected payload.
+        let initrd = gunzip(&read_fat_file(&fs, "A/initramfs.img"));
         let cpio = String::from_utf8_lossy(&initrd);
         assert!(cpio.contains("init\0"), "init present");
         assert!(
@@ -703,14 +733,15 @@ kind = "cni-plugins"
         );
         assert!(cpio.contains("ext4.ko"), "closure module ext4 present");
 
-        // emit_boot mirrors the FAT copies exactly.
+        // emit_boot is independent of the FAT layout (written from kernel_bytes/
+        // initrd, not staging); it mirrors slot A's kernel + initramfs.
         assert_eq!(
             std::fs::read(f.emit_boot.join("vmlinuz")).unwrap(),
-            read_fat_file(&fs, "vmlinuz")
+            read_fat_file(&fs, "A/vmlinuz")
         );
         assert_eq!(
             std::fs::read(f.emit_boot.join("initramfs.img")).unwrap(),
-            read_fat_file(&fs, "initramfs.img")
+            read_fat_file(&fs, "A/initramfs.img")
         );
     }
 
