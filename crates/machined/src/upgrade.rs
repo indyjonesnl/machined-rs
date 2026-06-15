@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::bootloader::BootloaderBackend;
 use machined_platform::Platform;
 use machined_resources::{Resource, ResourceObject, ResourceType, UpgradePhase, UpgradeStatus};
 use machined_runtime_core::{reconcile_owned, State};
@@ -126,12 +127,101 @@ pub async fn prepare(
     Ok(())
 }
 
+/// Verify + extract `bytes` (a bundle.tgz) into `dir`, stage the new
+/// kernel+initramfs into the inactive A/B slot via `backend`, and flip the boot
+/// pointer. Publishes UpgradeStatus along the way; on ANY failure publishes
+/// Failed and returns Err (caller keeps the node up). On success the node is
+/// ready to COLD-reboot into the freshly-staged slot.
+// Wired into main.rs in Task 6 (alongside SdBootBackend); unused until then and
+// would trip `dead_code` under CI's `-D warnings`. Mirrors bootloader.rs.
+#[allow(dead_code)]
+pub async fn stage_and_commit(
+    state: &State,
+    backend: &dyn BootloaderBackend,
+    dir: &Path,
+    bytes: &[u8],
+    sha256: &str,
+) -> anyhow::Result<()> {
+    publish(state, UpgradePhase::Verifying, "");
+    let got = sha256_hex(bytes);
+    if !got.eq_ignore_ascii_case(sha256) {
+        let msg = format!("sha256 mismatch: got {got}, want {sha256}");
+        publish(state, UpgradePhase::Failed, &msg);
+        anyhow::bail!(msg);
+    }
+    let (kernel, initrd) = match extract_bundle(bytes, dir) {
+        Ok(v) => v,
+        Err(e) => {
+            publish(state, UpgradePhase::Failed, &e.to_string());
+            return Err(e);
+        }
+    };
+    let slot = match backend.stage_inactive(&kernel, &initrd) {
+        Ok(s) => s,
+        Err(e) => {
+            publish(state, UpgradePhase::Failed, &e.to_string());
+            return Err(e);
+        }
+    };
+    if let Err(e) = backend.set_active(slot) {
+        publish(state, UpgradePhase::Failed, &e.to_string());
+        return Err(e);
+    }
+    info!(
+        "upgrade staged to slot {} and committed; cold reboot to apply",
+        slot.id()
+    );
+    publish(state, UpgradePhase::Staged, slot.id());
+    Ok(())
+}
+
+/// Download the bundle from `url`, then stage+commit it into STAGE_DIR (see
+/// [`stage_and_commit`]). On success the node is ready to COLD-reboot into the
+/// new slot.
+#[allow(dead_code)]
+pub async fn prepare_disk(
+    state: &State,
+    backend: &dyn BootloaderBackend,
+    url: &str,
+    sha256: &str,
+) -> anyhow::Result<()> {
+    publish(state, UpgradePhase::Downloading, url);
+    let url_owned = url.to_string();
+    let bytes = match tokio::task::spawn_blocking(move || http_get(&url_owned)).await? {
+        Ok(b) => b,
+        Err(e) => {
+            publish(state, UpgradePhase::Failed, &e.to_string());
+            return Err(e);
+        }
+    };
+    stage_and_commit(state, backend, Path::new(STAGE_DIR), &bytes, sha256).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bootloader::Slot;
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use std::io::Write;
+
+    struct StubBackend {
+        staged: std::sync::Mutex<Option<Slot>>,
+        active: std::sync::Mutex<Option<Slot>>,
+    }
+    impl crate::bootloader::BootloaderBackend for StubBackend {
+        fn current_slot(&self) -> Slot {
+            Slot::A
+        }
+        fn stage_inactive(&self, _k: &Path, _i: &Path) -> anyhow::Result<Slot> {
+            *self.staged.lock().unwrap() = Some(Slot::B);
+            Ok(Slot::B)
+        }
+        fn set_active(&self, s: Slot) -> anyhow::Result<()> {
+            *self.active.lock().unwrap() = Some(s);
+            Ok(())
+        }
+    }
 
     fn bundle(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut tar_bytes = Vec::new();
@@ -187,6 +277,46 @@ mod tests {
             .unwrap();
         assert!(
             matches!(got.spec, Resource::UpgradeStatus(u) if u.phase == UpgradePhase::Failed && u.message == "sha mismatch")
+        );
+    }
+
+    #[tokio::test]
+    async fn stage_and_commit_stages_inactive_then_flips_and_publishes_staged() {
+        use machined_resources::Key;
+        let state = State::new();
+        let dir = tempfile::tempdir().unwrap();
+        let tgz = bundle(&[("vmlinuz", b"K"), ("initramfs.img", b"I")]);
+        let sha = sha256_hex(&tgz);
+        let be = StubBackend {
+            staged: Default::default(),
+            active: Default::default(),
+        };
+        super::stage_and_commit(&state, &be, dir.path(), &tgz, &sha)
+            .await
+            .unwrap();
+        assert_eq!(*be.staged.lock().unwrap(), Some(Slot::B));
+        assert_eq!(*be.active.lock().unwrap(), Some(Slot::B));
+        let got = state
+            .get(&Key::new(NS, ResourceType::UpgradeStatus, "upgrade"))
+            .unwrap();
+        assert!(matches!(got.spec, Resource::UpgradeStatus(u) if u.phase == UpgradePhase::Staged));
+    }
+
+    #[tokio::test]
+    async fn stage_and_commit_sha_mismatch_fails_and_publishes_failed() {
+        let state = State::new();
+        let dir = tempfile::tempdir().unwrap();
+        let tgz = bundle(&[("vmlinuz", b"K"), ("initramfs.img", b"I")]);
+        let be = StubBackend {
+            staged: Default::default(),
+            active: Default::default(),
+        };
+        let err = super::stage_and_commit(&state, &be, dir.path(), &tgz, "deadbeef").await;
+        assert!(err.is_err());
+        assert_eq!(
+            *be.staged.lock().unwrap(),
+            None,
+            "must not stage on bad sha"
         );
     }
 }

@@ -6,6 +6,7 @@ pub enum UpgradePhase {
     Downloading,
     Verifying,
     Loaded,
+    Staged,
     Failed,
 }
 
