@@ -31,12 +31,16 @@ rm -rf "$WORK"; mkdir -p "$WORK"
 "$IMAGER" gen-pki --out "$WORK/pki"
 # --cache is pinned (the imager default is repo-relative target/imager-cache anyway,
 # but pin it so the cached Alpine artifacts are reused deterministically).
+# v1 boots FROM DISK via systemd-boot on its ESP (OVMF below), so it needs no
+# emitted kernel/initramfs — the imager writes slot A's vmlinuz+initramfs onto
+# the image's ESP itself.
 "$IMAGER" build --arch x86_64 --machined "$MACHINED" \
   --config examples/node-ci.yaml --pki-dir "$WORK/pki" \
   --image-id v1 \
-  --out "$IMG" --emit-boot "$WORK/boot" --cache target/imager-cache
+  --out "$IMG" --cache target/imager-cache
 
-# v2: same inputs, different image-id → a kexec target with a flipped marker.
+# v2: same inputs, different image-id → the A/B upgrade target with a flipped
+# marker. Keep --emit-boot: bundle.tgz (the upgrade payload) is tarred from it.
 "$IMAGER" build --arch x86_64 --machined "$MACHINED" \
   --config examples/node-ci.yaml --pki-dir "$WORK/pki" \
   --image-id v2 \
@@ -45,16 +49,23 @@ tar -czf "$WORK/bundle.tgz" -C "$WORK/boot-v2" vmlinuz initramfs.img
 BUNDLE_SHA=$(sha256sum "$WORK/bundle.tgz" | cut -d' ' -f1)
 
 echo "image:     $IMG ($(du -h "$IMG" | cut -f1))"
-echo "vmlinuz:   $WORK/boot/vmlinuz ($(du -h "$WORK/boot/vmlinuz" | cut -f1))"
-echo "initramfs: $WORK/boot/initramfs.img ($(du -h "$WORK/boot/initramfs.img" | cut -f1))"
+echo "v2 bundle: $WORK/bundle.tgz (sha=$BUNDLE_SHA)"
 
 KVM_FLAG=""
 [ -w /dev/kvm ] && KVM_FLAG="-enable-kvm -cpu host"
 
+# Boot FROM DISK via OVMF (x86 UEFI firmware) + systemd-boot — NO -kernel/-initrd
+# and NO -no-reboot. The firmware finds the image's ESP, runs systemd-boot, which
+# reads loader.conf and boots the A/B slot. Dropping -no-reboot is REQUIRED: the
+# cold-reboot upgrade has machined reboot the node itself (FinalAction::Reboot),
+# qemu resets, OVMF re-reads the SAME disk, and systemd-boot picks slot B (v2).
+# OVMF firmware is copied to per-run writable scratch (VARS pflash is written).
+cp /usr/share/OVMF/OVMF_CODE.fd "$WORK/ovmf_code.fd"
+cp /usr/share/OVMF/OVMF_VARS.fd "$WORK/ovmf_vars.fd"
 # shellcheck disable=SC2086  # KVM_FLAG is an intentional word-split flag list.
 qemu-system-x86_64 $KVM_FLAG -m 512 -machine q35 \
-  -kernel "$WORK/boot/vmlinuz" -initrd "$WORK/boot/initramfs.img" \
-  -append "console=ttyS0" \
+  -drive if=pflash,format=raw,unit=0,readonly=on,file="$WORK/ovmf_code.fd" \
+  -drive if=pflash,format=raw,unit=1,file="$WORK/ovmf_vars.fd" \
   -drive file="$IMG",if=virtio,format=raw \
   -netdev "user,id=n0,hostfwd=tcp:127.0.0.1:${PORT}-:50000" \
   -device virtio-net-pci,netdev=n0 \
@@ -80,6 +91,9 @@ while [ $SECONDS -lt $deadline ]; do
 done
 if [ $SECONDS -ge $deadline ]; then echo "TIMEOUT waiting for API"; tail -80 "$SERIAL"; exit 1; fi
 echo "API up: $(ctl version)"
+
+# Soft (non-fatal) marker that we booted FROM DISK via systemd-boot into slot A.
+grep -qiE "systemd-boot|Linux-Boot|/A/vmlinuz|machined.slot=a" "$SERIAL" || echo "WARN: no sd-boot marker in serial (boot path?)"
 
 # machinectl `get` prints one row per resource: "<id>\t<k=v k=v ...>".
 # A provisioned VolumeStatus row looks like:
@@ -162,7 +176,7 @@ if [ "${pods_ok:-0}" -ne 1 ]; then
   fi
 fi
 
-# --- M9a: kexec upgrade v1 -> v2 ---
+# --- M9b-1: disk A/B upgrade — survives a COLD reboot ---
 echo "asserting image-id v1..."
 V1=$(ctl version 2>/dev/null || true)
 echo "version: $V1"
@@ -171,18 +185,23 @@ echo "$V1" | grep -q 'image_id=v1' || { echo "expected image_id=v1, got: $V1"; t
 echo "triggering upgrade to v2 (http://10.0.2.2:${UP_PORT}/bundle.tgz)..."
 ctl upgrade "http://10.0.2.2:${UP_PORT}/bundle.tgz" "$BUNDLE_SHA" || { echo "upgrade RPC failed"; tail -120 "$SERIAL"; exit 1; }
 
-echo "waiting for the node to kexec into v2 (max 240s)..."
-up_deadline=$((SECONDS + 240))
+# machined stages v2 into the inactive slot, flips loader.conf's `default`, and
+# COLD-reboots (FinalAction::Reboot -> platform.reboot()). qemu (no -no-reboot)
+# resets, OVMF re-reads the SAME disk, systemd-boot picks slot B -> v2. We just
+# wait for the API to answer as v2 with STATE still Provisioned.
+echo "waiting for the node to COLD-reboot into v2 (max 360s)..."
+up_deadline=$((SECONDS + 360))
 while [ $SECONDS -lt $up_deadline ]; do
   V=$(ctl version 2>/dev/null || true)
   if echo "$V" | grep -q 'image_id=v2'; then
     echo "post-upgrade version: $V"
-    # STATE/PKI persisted across the warm boot: the SAME machinectl bundle still
+    # STATE/PKI persisted across the cold reboot: the SAME machinectl bundle still
     # authenticates (we are still using it), and volumes are still Provisioned.
     VOLS=$(ctl get VolumeStatus --namespace block 2>/dev/null || true)
     if echo "$VOLS" | grep -Eq 'name=STATE .*phase=Provisioned' \
        && echo "$VOLS" | grep -Eq 'name=EPHEMERAL .*phase=Provisioned'; then
-      echo "$VOLS"; echo "BOOT TEST PASSED (kexec upgrade v1->v2, STATE persisted)"; exit 0
+      echo "$VOLS"
+      echo "BOOT TEST PASSED (disk A/B upgrade v1->v2 survived a COLD reboot, STATE persisted)"; exit 0
     fi
   fi
   if ! kill -0 $QEMU 2>/dev/null; then echo "QEMU died during upgrade"; tail -200 "$SERIAL"; exit 1; fi

@@ -18,6 +18,7 @@ RUN apt-get update \
       qemu-system-x86 \
       qemu-system-arm \
       qemu-efi-aarch64 \
+      ovmf \
       musl-tools \
       gcc-aarch64-linux-gnu \
       libc6-dev-arm64-cross \
@@ -29,6 +30,14 @@ RUN apt-get update \
 # runs `python3 -m http.server` on the host so machined (in the VM) can download
 # the v2 image over slirp (10.0.2.2) and kexec into it. No third-party packages —
 # just the stdlib http.server.
+
+# ovmf provides the x86_64 UEFI firmware (OVMF_CODE.fd + OVMF_VARS.fd). The
+# M9b-1 boot test boots the built image FROM DISK via systemd-boot on its ESP —
+# qemu runs OVMF as pflash (no external `-kernel`/`-initrd`), the firmware finds
+# the EFI System Partition, loads systemd-boot, which reads loader.conf and boots
+# the A/B slot. This is what lets the disk A/B upgrade survive a COLD reboot:
+# after machined flips loader.conf's `default` and reboots, OVMF re-reads the
+# same disk and systemd-boot picks the inactive (v2) slot.
 
 # qemu-efi-aarch64 provides the AAVMF/edk2 UEFI firmware (QEMU_EFI.fd). aarch64's
 # Alpine vmlinuz-virt is an EFI-stub PE kernel — unlike x86's self-decompressing
@@ -56,6 +65,8 @@ RUN rustup toolchain install stable --profile minimal \
 # Sanity: fail the image build if any tool the boot-test relies on is missing.
 RUN qemu-system-x86_64 --version \
  && qemu-system-aarch64 --version \
+ && test -f /usr/share/OVMF/OVMF_CODE.fd \
+ && test -f /usr/share/OVMF/OVMF_VARS.fd \
  && musl-gcc --version \
  && aarch64-linux-gnu-gcc --version \
  && python3 --version \
