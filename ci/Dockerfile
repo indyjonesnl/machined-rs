@@ -22,7 +22,13 @@ RUN apt-get update \
       gcc-aarch64-linux-gnu \
       libc6-dev-arm64-cross \
       make \
+      python3 \
  && rm -rf /var/lib/apt/lists/*
+
+# python3 serves the M9a kexec-upgrade bundle to the guest: the x86 boot test
+# runs `python3 -m http.server` on the host so machined (in the VM) can download
+# the v2 image over slirp (10.0.2.2) and kexec into it. No third-party packages —
+# just the stdlib http.server.
 
 # qemu-efi-aarch64 provides the AAVMF/edk2 UEFI firmware (QEMU_EFI.fd). aarch64's
 # Alpine vmlinuz-virt is an EFI-stub PE kernel — unlike x86's self-decompressing
@@ -52,5 +58,6 @@ RUN qemu-system-x86_64 --version \
  && qemu-system-aarch64 --version \
  && musl-gcc --version \
  && aarch64-linux-gnu-gcc --version \
+ && python3 --version \
  && rustup target list --installed | grep -qx x86_64-unknown-linux-musl \
  && rustup target list --installed | grep -qx aarch64-unknown-linux-musl
