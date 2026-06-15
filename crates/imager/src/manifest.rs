@@ -39,7 +39,15 @@ impl Manifest {
         toml::from_str(&text).with_context(|| format!("parsing manifest {}", path.display()))
     }
     pub fn for_arch(&self, arch: &str) -> Option<&[Artifact]> {
-        self.artifact.get(arch).map(|v| v.as_slice())
+        // aarch64-mbr is a test-only partition-scheme variant of aarch64 (same
+        // virt kernel + same aarch64 binaries, only the partition table differs),
+        // so it reuses the aarch64 pinned artifact set rather than duplicating it.
+        let key = if arch == "aarch64-mbr" {
+            "aarch64"
+        } else {
+            arch
+        };
+        self.artifact.get(key).map(|v| v.as_slice())
     }
 }
 
@@ -106,5 +114,16 @@ kind = "apk"
         assert!(rpi.iter().any(|a| a.name == "runc"
             && a.kind == "boot-binary"
             && a.rename.as_deref() == Some("runc")));
+    }
+
+    #[test]
+    fn mbr_test_arch_aliases_aarch64_artifacts() {
+        // aarch64-mbr has no artifact section of its own; it reuses aarch64's.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("artifacts.toml");
+        let m = Manifest::load(&path).expect("artifacts.toml parses");
+        let mbr = m.for_arch("aarch64-mbr").expect("aarch64-mbr aliases aarch64");
+        let arm = m.for_arch("aarch64").expect("aarch64 present");
+        let names = |a: &[Artifact]| a.iter().map(|x| x.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(mbr), names(arm), "aarch64-mbr must reuse aarch64 pins");
     }
 }

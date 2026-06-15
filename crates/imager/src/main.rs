@@ -28,7 +28,7 @@ enum Command {
     /// Build a bootable disk image.
     Build {
         /// Target architecture.
-        #[arg(long, value_parser = ["x86_64", "aarch64", "aarch64-rpi"])]
+        #[arg(long, value_parser = ["x86_64", "aarch64", "aarch64-rpi", "aarch64-mbr"])]
         arch: String,
         /// Image identity baked into the initramfs (/etc/machined/image-id), reported via the API.
         #[arg(long, default_value = "dev")]

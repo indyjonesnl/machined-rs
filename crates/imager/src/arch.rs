@@ -41,6 +41,20 @@ pub fn arch_config(arch: &str) -> Option<ArchConfig> {
             scheme: PartScheme::Mbr,
             rpi_firmware: true,
         },
+        // Test-only vehicle: the qemu-virt kernel (boots on -M virt) but with the
+        // Pi's MBR partition table instead of GPT. It exists so CI can exercise
+        // machined's MBR partition read (the gpt-crate-fails -> sysfs-fallback
+        // path) and the vfat /boot mount on a real kernel — the exact code path
+        // the Raspberry Pi uses, which qemu's raspi3 SD model cannot exercise
+        // (sdhost never exposes mmcblk0pN; see scripts/boot-test-aarch64-rpi.sh).
+        // No real hardware ships this combo; it is purely an emulation-coverage
+        // stand-in for the Pi's MBR boot disk.
+        "aarch64-mbr" => ArchConfig {
+            kernel_path: "boot/vmlinuz-virt",
+            module_roots: crate::modules::VIRT_MODULES,
+            scheme: PartScheme::Mbr,
+            rpi_firmware: false,
+        },
         _ => return None,
     })
 }
@@ -67,6 +81,18 @@ mod tests {
         assert_eq!(c.scheme, PartScheme::Mbr);
         assert!(c.rpi_firmware);
         assert!(c.module_roots.is_empty(), "Pi SD/FS drivers are builtin");
+    }
+
+    #[test]
+    fn mbr_test_arch_uses_virt_kernel_with_mbr_scheme() {
+        // The aarch64-mbr coverage vehicle: virt kernel (boots on -M virt) but
+        // MBR scheme, so it exercises the Pi's MBR/vfat boot path under a machine
+        // whose disk DOES expose partitions. No Pi firmware.
+        let c = arch_config("aarch64-mbr").unwrap();
+        assert_eq!(c.kernel_path, "boot/vmlinuz-virt");
+        assert_eq!(c.scheme, PartScheme::Mbr);
+        assert!(!c.rpi_firmware);
+        assert_eq!(c.module_roots, crate::modules::VIRT_MODULES);
     }
 
     #[test]

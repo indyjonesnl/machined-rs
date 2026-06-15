@@ -1,4 +1,4 @@
-.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 dist-aarch64 boot-test boot-test-aarch64 build-image-aarch64-rpi boot-test-aarch64-rpi
+.PHONY: pre-commit fmt clippy test root-tests dist-x86_64 dist-aarch64 boot-test boot-test-aarch64 boot-test-aarch64-mbr build-image-aarch64-rpi boot-test-aarch64-rpi
 
 pre-commit: fmt clippy test
 
@@ -57,6 +57,14 @@ boot-test: dist-x86_64
 boot-test-aarch64: dist-aarch64
 	cargo build --release -p machined-imager -p machinectl
 	./scripts/boot-test-aarch64.sh
+
+# Boot an aarch64 MBR image under -M virt and assert machined mounts the FAT
+# /boot off the MBR disk. Covers the Pi's MBR/vfat boot path that qemu's raspi3
+# SD model can't exercise (the raspi3 sdhost never exposes mmcblk0pN); -M virt's
+# virtio-blk does expose vda1. See scripts/boot-test-aarch64-mbr.sh.
+boot-test-aarch64-mbr: dist-aarch64
+	cargo build --release -p machined-imager
+	./scripts/boot-test-aarch64-mbr.sh
 
 # Build the aarch64-rpi (Pi 3A+) image and verify its FAT — no boot (manual Pi).
 build-image-aarch64-rpi: dist-aarch64

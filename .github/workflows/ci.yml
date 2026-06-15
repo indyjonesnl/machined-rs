@@ -95,6 +95,44 @@ jobs:
           path: target/boot-test/serial.log
           if-no-files-found: ignore
 
+  boot-test-aarch64-mbr:
+    runs-on: ubuntu-latest
+    needs: check
+    timeout-minutes: 45
+    # Boots an aarch64 MBR-partitioned image under -M virt and asserts machined
+    # mounts the FAT /boot off the MBR disk. This covers the Raspberry Pi's MBR +
+    # vfat /boot code path (GPT-read fails -> sysfs partition fallback -> mount
+    # first vfat), which the raspi3ap job CANNOT exercise: qemu's raspi3 SD model
+    # never exposes the MBR partition table to the kernel (mmcblk0pN is never
+    # created). -M virt's virtio-blk does expose vda1, so the same MBR layout
+    # boots there. Pure TCG (no KVM); the marker fires in seconds of guest time.
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/indyjonesnl/machined-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: cache imager artifacts
+        uses: actions/cache@v4
+        with:
+          path: target/imager-cache
+          key: imager-artifacts-${{ hashFiles('crates/imager/artifacts.toml') }}
+      - name: boot test (aarch64 MBR /boot on -M virt)
+        timeout-minutes: 35
+        run: make boot-test-aarch64-mbr
+      - name: upload serial log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-test-aarch64-mbr-serial-log
+          path: target/boot-test-mbr/serial.log
+          if-no-files-found: ignore
+
   build-image-aarch64-rpi:
     runs-on: ubuntu-latest
     needs: check
