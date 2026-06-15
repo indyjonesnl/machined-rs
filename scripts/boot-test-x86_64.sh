@@ -54,12 +54,13 @@ echo "v2 bundle: $WORK/bundle.tgz (sha=$BUNDLE_SHA)"
 KVM_FLAG=""
 [ -w /dev/kvm ] && KVM_FLAG="-enable-kvm -cpu host"
 
-# Boot FROM DISK via OVMF (x86 UEFI firmware) + systemd-boot — NO -kernel/-initrd
-# and NO -no-reboot. The firmware finds the image's ESP, runs systemd-boot, which
-# reads loader.conf and boots the A/B slot. Dropping -no-reboot is REQUIRED: the
-# cold-reboot upgrade has machined reboot the node itself (FinalAction::Reboot),
-# qemu resets, OVMF re-reads the SAME disk, and systemd-boot picks slot B (v2).
-# OVMF firmware is copied to per-run writable scratch (VARS pflash is written).
+# Boot FROM DISK via OVMF (x86 UEFI firmware) + systemd-boot — NO -kernel/-initrd.
+# The firmware finds the image's ESP, runs systemd-boot, which reads loader.conf
+# and boots the A/B slot. Do NOT add -no-reboot: the cold-reboot upgrade needs the
+# guest to actually reset and re-read the disk — machined reboots the node itself
+# (FinalAction::Reboot), qemu resets, OVMF re-reads the SAME disk, and systemd-boot
+# picks slot B (v2). OVMF firmware is copied to per-run writable scratch (the VARS
+# pflash is written).
 cp /usr/share/OVMF/OVMF_CODE.fd "$WORK/ovmf_code.fd"
 cp /usr/share/OVMF/OVMF_VARS.fd "$WORK/ovmf_vars.fd"
 # shellcheck disable=SC2086  # KVM_FLAG is an intentional word-split flag list.
@@ -186,9 +187,10 @@ echo "triggering upgrade to v2 (http://10.0.2.2:${UP_PORT}/bundle.tgz)..."
 ctl upgrade "http://10.0.2.2:${UP_PORT}/bundle.tgz" "$BUNDLE_SHA" || { echo "upgrade RPC failed"; tail -120 "$SERIAL"; exit 1; }
 
 # machined stages v2 into the inactive slot, flips loader.conf's `default`, and
-# COLD-reboots (FinalAction::Reboot -> platform.reboot()). qemu (no -no-reboot)
-# resets, OVMF re-reads the SAME disk, systemd-boot picks slot B -> v2. We just
-# wait for the API to answer as v2 with STATE still Provisioned.
+# COLD-reboots (FinalAction::Reboot -> platform.reboot()). Because qemu runs
+# without -no-reboot it resets, OVMF re-reads the SAME disk, and systemd-boot
+# picks slot B -> v2. We just wait for the API to answer as v2 with STATE still
+# Provisioned.
 echo "waiting for the node to COLD-reboot into v2 (max 360s)..."
 up_deadline=$((SECONDS + 360))
 while [ $SECONDS -lt $up_deadline ]; do

@@ -26,10 +26,11 @@ RUN apt-get update \
       python3 \
  && rm -rf /var/lib/apt/lists/*
 
-# python3 serves the M9a kexec-upgrade bundle to the guest: the x86 boot test
+# python3 serves the M9b-1 disk A/B upgrade bundle to the guest: the x86 boot test
 # runs `python3 -m http.server` on the host so machined (in the VM) can download
-# the v2 image over slirp (10.0.2.2) and kexec into it. No third-party packages —
-# just the stdlib http.server.
+# the v2 bundle over slirp (10.0.2.2), stage it into the inactive A/B slot, flip
+# loader.conf, and COLD-reboot into it. No third-party packages — just the stdlib
+# http.server.
 
 # ovmf provides the x86_64 UEFI firmware (OVMF_CODE.fd + OVMF_VARS.fd). The
 # M9b-1 boot test boots the built image FROM DISK via systemd-boot on its ESP —
