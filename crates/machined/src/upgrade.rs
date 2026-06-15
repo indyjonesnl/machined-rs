@@ -205,9 +205,11 @@ mod tests {
     use flate2::Compression;
     use std::io::Write;
 
+    #[derive(Default)]
     struct StubBackend {
         staged: std::sync::Mutex<Option<Slot>>,
         active: std::sync::Mutex<Option<Slot>>,
+        fail_set_active: bool,
     }
     impl crate::bootloader::BootloaderBackend for StubBackend {
         fn current_slot(&self) -> Slot {
@@ -218,6 +220,9 @@ mod tests {
             Ok(Slot::B)
         }
         fn set_active(&self, s: Slot) -> anyhow::Result<()> {
+            if self.fail_set_active {
+                anyhow::bail!("inject");
+            }
             *self.active.lock().unwrap() = Some(s);
             Ok(())
         }
@@ -287,10 +292,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let tgz = bundle(&[("vmlinuz", b"K"), ("initramfs.img", b"I")]);
         let sha = sha256_hex(&tgz);
-        let be = StubBackend {
-            staged: Default::default(),
-            active: Default::default(),
-        };
+        let be = StubBackend::default();
         super::stage_and_commit(&state, &be, dir.path(), &tgz, &sha)
             .await
             .unwrap();
@@ -299,7 +301,9 @@ mod tests {
         let got = state
             .get(&Key::new(NS, ResourceType::UpgradeStatus, "upgrade"))
             .unwrap();
-        assert!(matches!(got.spec, Resource::UpgradeStatus(u) if u.phase == UpgradePhase::Staged));
+        assert!(
+            matches!(got.spec, Resource::UpgradeStatus(u) if u.phase == UpgradePhase::Staged && u.message == "b")
+        );
     }
 
     #[tokio::test]
@@ -307,10 +311,7 @@ mod tests {
         let state = State::new();
         let dir = tempfile::tempdir().unwrap();
         let tgz = bundle(&[("vmlinuz", b"K"), ("initramfs.img", b"I")]);
-        let be = StubBackend {
-            staged: Default::default(),
-            active: Default::default(),
-        };
+        let be = StubBackend::default();
         let err = super::stage_and_commit(&state, &be, dir.path(), &tgz, "deadbeef").await;
         assert!(err.is_err());
         assert_eq!(
@@ -318,5 +319,30 @@ mod tests {
             None,
             "must not stage on bad sha"
         );
+    }
+
+    // stage_inactive succeeds but set_active fails: the inactive slot is written
+    // yet the boot pointer is NOT flipped, so a cold reboot still lands on the
+    // old slot. stage_and_commit must surface the error and publish Failed.
+    #[tokio::test]
+    async fn stage_and_commit_set_active_failure_aborts_and_publishes_failed() {
+        use machined_resources::Key;
+        let state = State::new();
+        let dir = tempfile::tempdir().unwrap();
+        let tgz = bundle(&[("vmlinuz", b"K"), ("initramfs.img", b"I")]);
+        let sha = sha256_hex(&tgz);
+        let be = StubBackend {
+            fail_set_active: true,
+            ..Default::default()
+        };
+        let err = super::stage_and_commit(&state, &be, dir.path(), &tgz, &sha).await;
+        assert!(err.is_err());
+        // inactive slot was written, but the pointer never flipped.
+        assert_eq!(*be.staged.lock().unwrap(), Some(Slot::B));
+        assert_eq!(*be.active.lock().unwrap(), None);
+        let got = state
+            .get(&Key::new(NS, ResourceType::UpgradeStatus, "upgrade"))
+            .unwrap();
+        assert!(matches!(got.spec, Resource::UpgradeStatus(u) if u.phase == UpgradePhase::Failed));
     }
 }
