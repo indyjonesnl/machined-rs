@@ -27,6 +27,11 @@ anyhow.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+ureq.workspace = true
+sha2.workspace = true
+hex.workspace = true
+flate2.workspace = true
+tar.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 nix.workspace = true

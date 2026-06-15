@@ -19,6 +19,7 @@ pub fn build_initramfs(
     machined: &Path,
     module_paths: &[String],
     kver: &str,
+    image_id: &str,
 ) -> anyhow::Result<Vec<u8>> {
     use anyhow::Context;
 
@@ -59,6 +60,7 @@ pub fn build_initramfs(
         .map(|p| format!("/lib/modules/{kver}/{p}\n"))
         .collect();
     w.file("etc/machined/modules.load", 0o644, modules_load.as_bytes());
+    w.file("etc/machined/image-id", 0o644, image_id.as_bytes());
     add_tree(&mut w, rootfs, rootfs)?;
 
     let mut gz = GzEncoder::new(Vec::new(), Compression::default());
@@ -116,6 +118,7 @@ mod tests {
                 "kernel/drivers/block/virtio_blk.ko".into(),
             ],
             "6.12.81-0-virt",
+            "test-image",
         )
         .unwrap();
 
@@ -126,6 +129,7 @@ mod tests {
         assert!(text.contains("dev/console"));
         assert!(text.contains("sbin/mkfs.ext4"));
         assert!(text.contains("etc/machined/modules.load"));
+        assert!(text.contains("etc/machined/image-id"));
         // modules.load content: absolute, ordered paths
         let want = "/lib/modules/6.12.81-0-virt/kernel/fs/ext4/ext4.ko\n/lib/modules/6.12.81-0-virt/kernel/drivers/block/virtio_blk.ko\n";
         assert!(
@@ -149,7 +153,8 @@ mod tests {
         let machined = dir.path().join("machined");
         std::fs::write(&machined, b"machined-elf").unwrap();
 
-        let bytes = build_initramfs(&rootfs, &machined, &[], "6.12.81-0-virt").unwrap();
+        let bytes =
+            build_initramfs(&rootfs, &machined, &[], "6.12.81-0-virt", "test-image").unwrap();
         let mut raw = Vec::new();
         GzDecoder::new(&bytes[..]).read_to_end(&mut raw).unwrap();
 
@@ -220,8 +225,10 @@ mod tests {
         std::fs::write(&machined, b"machined-elf").unwrap();
 
         let modules = ["kernel/fs/ext4/ext4.ko".into()];
-        let a = build_initramfs(&rootfs, &machined, &modules, "6.12.81-0-virt").unwrap();
-        let b = build_initramfs(&rootfs, &machined, &modules, "6.12.81-0-virt").unwrap();
+        let a =
+            build_initramfs(&rootfs, &machined, &modules, "6.12.81-0-virt", "test-image").unwrap();
+        let b =
+            build_initramfs(&rootfs, &machined, &modules, "6.12.81-0-virt", "test-image").unwrap();
         assert_eq!(a, b, "identical inputs must yield byte-identical archives");
     }
 
@@ -234,7 +241,8 @@ mod tests {
         let machined = dir.path().join("machined");
         std::fs::write(&machined, b"machined-elf").unwrap();
 
-        let err = build_initramfs(&rootfs, &machined, &[], "6.12.81-0-virt").unwrap_err();
+        let err =
+            build_initramfs(&rootfs, &machined, &[], "6.12.81-0-virt", "test-image").unwrap_err();
         assert!(
             err.to_string().contains("init"),
             "error should mention the init collision: {err}"

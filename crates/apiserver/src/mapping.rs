@@ -22,6 +22,7 @@ pub fn parse_resource_type(s: &str) -> Option<ResourceType> {
         "TimeStatus" => ResourceType::TimeStatus,
         "RuntimeStatus" => ResourceType::RuntimeStatus,
         "PodStatus" => ResourceType::PodStatus,
+        "UpgradeStatus" => ResourceType::UpgradeStatus,
         _ => return None,
     })
 }
@@ -116,6 +117,10 @@ pub fn resource_to_fields(spec: &Resource) -> Vec<(String, String)> {
             kv("container_id", &p.container_id),
             kv("pod_ip", &p.pod_ip),
             kv("message", &p.message),
+        ],
+        Resource::UpgradeStatus(u) => vec![
+            kv("phase", format!("{:?}", u.phase)),
+            kv("message", &u.message),
         ],
     }
 }

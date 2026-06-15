@@ -25,7 +25,11 @@
 
 [artifact]
 x86_64 = [
-  { name = "linux-virt", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/linux-virt-6.12.93-r0.apk", sha256 = "46851b49c0c8f7d689315556caff54df457238fd9c575b4e16837031a6653c27", kind = "apk" },
+  # Custom kernel: Alpine linux-virt 6.12.93 .config + CONFIG_KEXEC_FILE=y (stock
+  # Alpine ships it off; machined's in-process kexec_file_load upgrade needs it).
+  # Same .config otherwise (virtio/ext4/overlay/veth/bridge/nf_* =m, vmlinuz-virt).
+  # Built via scripts/build-kexec-kernel.sh; host on a GHCR release + re-pin the sha.
+  { name = "linux-virt", url = "https://github.com/indyjonesnl/machined-rs/releases/download/kernel-6.12.93-machined/custom-kernel-virt-6.12.93-machined.tar.gz", sha256 = "c5a60dec2e0e486c3af9fdcfc6b52152312d4fa110bc4e7d1edcc9855411458b", kind = "apk" },
   { name = "musl", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/musl-1.2.5-r11.apk", sha256 = "61e84757a8bfbc0d7fa8f4ce6de9cd4d791714369d78f6a08e5b03510fb2a623", kind = "apk" },
   { name = "e2fsprogs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/e2fsprogs-1.47.1-r1.apk", sha256 = "f778a891aa832f40cf3be200b8ac346540c87fb90063e843f0d74044cff0b9c5", kind = "apk" },
   { name = "e2fsprogs-libs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/e2fsprogs-libs-1.47.1-r1.apk", sha256 = "728d6d3c4d2f3a8d4384f64b00811f47c2ad1760f52b9e1ac82f88216c8fcbb3", kind = "apk" },

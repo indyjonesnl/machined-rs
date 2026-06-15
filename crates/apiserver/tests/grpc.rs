@@ -11,9 +11,13 @@ use tonic::transport::Server;
 #[tokio::test]
 async fn version_over_plaintext() {
     let state = State::new();
-    let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-        Machine::new(state, "9.9.9", tokio::sync::mpsc::channel(1).0),
-    );
+    let svc =
+        machined_apiserver::pb::machine_service_server::MachineServiceServer::new(Machine::new(
+            state,
+            "9.9.9",
+            "test-image",
+            tokio::sync::mpsc::channel(1).0,
+        ));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -32,6 +36,7 @@ async fn version_over_plaintext() {
         .unwrap();
     let resp = client.version(Empty {}).await.unwrap().into_inner();
     assert_eq!(resp.version, "9.9.9");
+    assert_eq!(resp.image_id, "test-image");
 }
 
 #[tokio::test]
@@ -53,9 +58,13 @@ async fn lists_seeded_resources_over_plaintext() {
         ))
         .unwrap();
 
-    let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-        Machine::new(state, "9.9.9", tokio::sync::mpsc::channel(1).0),
-    );
+    let svc =
+        machined_apiserver::pb::machine_service_server::MachineServiceServer::new(Machine::new(
+            state,
+            "9.9.9",
+            "test-image",
+            tokio::sync::mpsc::channel(1).0,
+        ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
@@ -113,7 +122,12 @@ async fn mtls_requires_a_valid_client_cert() {
                 .client_ca_root(Certificate::from_pem(pki_moved.ca_pem()))
         };
         let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-            machined_apiserver::Machine::new(state, "9.9.9", tokio::sync::mpsc::channel(1).0),
+            machined_apiserver::Machine::new(
+                state,
+                "9.9.9",
+                "test-image",
+                tokio::sync::mpsc::channel(1).0,
+            ),
         );
         Server::builder()
             .tls_config(tls)
@@ -188,12 +202,12 @@ async fn mtls_requires_a_valid_client_cert() {
 #[tokio::test]
 async fn reboot_and_shutdown_enqueue_actions() {
     use machined_apiserver::pb::machine_service_client::MachineServiceClient;
-    use machined_apiserver::pb::Empty;
+    use machined_apiserver::pb::{Empty, UpgradeRequest};
     use machined_apiserver::{Machine, NodeAction};
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(3);
     let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-        Machine::new(State::new(), "9.9.9", tx),
+        Machine::new(State::new(), "9.9.9", "test-image", tx),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -216,6 +230,20 @@ async fn reboot_and_shutdown_enqueue_actions() {
     assert_eq!(rx.recv().await, Some(NodeAction::Shutdown));
     client.reset(Empty {}).await.unwrap();
     assert_eq!(rx.recv().await, Some(NodeAction::Reset));
+    client
+        .upgrade(UpgradeRequest {
+            url: "https://example.test/bundle.tar.gz".into(),
+            sha256: "deadbeef".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        rx.recv().await,
+        Some(NodeAction::Upgrade {
+            url: "https://example.test/bundle.tar.gz".into(),
+            sha256: "deadbeef".into(),
+        })
+    );
 }
 
 #[tokio::test]
@@ -224,9 +252,13 @@ async fn server_exits_on_shutdown_signal() {
 
     let token = CancellationToken::new();
     let t2 = token.clone();
-    let svc = machined_apiserver::pb::machine_service_server::MachineServiceServer::new(
-        Machine::new(State::new(), "9.9.9", tokio::sync::mpsc::channel(1).0),
-    );
+    let svc =
+        machined_apiserver::pb::machine_service_server::MachineServiceServer::new(Machine::new(
+            State::new(),
+            "9.9.9",
+            "test-image",
+            tokio::sync::mpsc::channel(1).0,
+        ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     let h = tokio::spawn(async move {

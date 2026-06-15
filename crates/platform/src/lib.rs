@@ -108,6 +108,13 @@ pub trait Platform: Send + Sync {
     fn sync(&self);
     fn reboot(&self) -> Result<()>;
     fn poweroff(&self) -> Result<()>;
+    /// Load a new kernel+initramfs into the kexec buffer (kexec_file_load(2)).
+    /// `cmdline` is used verbatim for the new kernel (typically /proc/cmdline).
+    /// Must run while the files are readable (before the shutdown unmount).
+    fn kexec_load(&self, kernel: &Path, initrd: &Path, cmdline: &str) -> Result<()>;
+    /// Boot the previously kexec-loaded image (reboot(RB_KEXEC)). Returns only
+    /// on failure (success replaces the running kernel).
+    fn reboot_kexec(&self) -> Result<()>;
 
     /// Mount every essential pseudo-filesystem that isn't already mounted.
     /// Idempotent: re-running (e.g. the sequencer's MountFilesystems after an

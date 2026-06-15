@@ -6,6 +6,7 @@ use std::path::Path;
 
 pub struct BuildOpts<'a> {
     pub arch: &'a str,
+    pub image_id: &'a str,
     pub machined: &'a Path,
     pub config: &'a Path,
     pub out: &'a Path,
@@ -130,7 +131,7 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
 
     // 4. Initramfs carries ONLY the resolved closure, not all modules.
     prune_for_initramfs(&rootfs, &kver, &mods)?;
-    let initrd = initramfs::build_initramfs(&rootfs, o.machined, &mods, &kver)?;
+    let initrd = initramfs::build_initramfs(&rootfs, o.machined, &mods, &kver, o.image_id)?;
 
     // 5. Stage the FAT tree and write the image. (staging/ and staging/bin were
     // created before the fetch loop so boot artifacts could land in /boot/bin.)
@@ -512,6 +513,7 @@ kind = "cni-plugins"
     fn opts<'a>(f: &'a Fixture, pki: bool, emit: bool) -> BuildOpts<'a> {
         BuildOpts {
             arch: "x86_64",
+            image_id: "test",
             machined: &f.machined,
             config: &f.config,
             out: &f.out,

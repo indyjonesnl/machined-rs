@@ -1079,6 +1079,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "flate2",
+ "hex",
  "machined-apiserver",
  "machined-block",
  "machined-common",
@@ -1094,10 +1096,13 @@ dependencies = [
  "machined-supervisor",
  "machined-time",
  "nix 0.29.0",
+ "sha2",
+ "tar",
  "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
+ "ureq",
 ]
 
 [[package]]
@@ -1232,6 +1237,7 @@ dependencies = [
 name = "machined-platform"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "nix 0.29.0",
  "thiserror 1.0.69",
  "tracing",

@@ -10,6 +10,7 @@ use crate::network::{
 use crate::pod_status::PodStatus;
 use crate::runtime_status::RuntimeStatus;
 use crate::time::TimeStatus;
+use crate::upgrade_status::UpgradeStatus;
 
 /// Spec for the loaded machine configuration, surfaced as a resource so
 /// controllers reconcile against it via the normal watch path.
@@ -63,6 +64,7 @@ pub enum Resource {
     TimeStatus(TimeStatus),
     RuntimeStatus(RuntimeStatus),
     PodStatus(PodStatus),
+    UpgradeStatus(UpgradeStatus),
 }
 
 impl Resource {
@@ -86,6 +88,7 @@ impl Resource {
             Resource::TimeStatus(_) => ResourceType::TimeStatus,
             Resource::RuntimeStatus(_) => ResourceType::RuntimeStatus,
             Resource::PodStatus(_) => ResourceType::PodStatus,
+            Resource::UpgradeStatus(_) => ResourceType::UpgradeStatus,
         }
     }
 }

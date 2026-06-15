@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use machined_apiserver::pb::machine_service_client::MachineServiceClient;
-use machined_apiserver::pb::{Empty, ListResourcesRequest};
+use machined_apiserver::pb::{Empty, ListResourcesRequest, UpgradeRequest};
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 
 /// machined management CLI.
@@ -43,6 +43,13 @@ enum Command {
         /// Confirm the destructive reset.
         #[arg(long)]
         yes: bool,
+    },
+    /// Upgrade the node to a new image bundle (downloads, verifies, kexecs).
+    Upgrade {
+        /// HTTP(S) URL of the upgrade bundle (.tar.gz of vmlinuz + initramfs.img).
+        url: String,
+        /// Expected sha256 (hex) of the bundle.
+        sha256: String,
     },
 }
 
@@ -83,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Version => {
             let v = client.version(Empty {}).await?.into_inner();
-            println!("{}", v.version);
+            println!("version={} image_id={}", v.version, v.image_id);
         }
         Command::Get {
             resource_type,
@@ -117,6 +124,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Reset { .. } => {
             client.reset(Empty {}).await?;
             println!("reset requested");
+        }
+        Command::Upgrade { url, sha256 } => {
+            client.upgrade(UpgradeRequest { url, sha256 }).await?;
+            println!("upgrade requested");
         }
     }
     Ok(())
