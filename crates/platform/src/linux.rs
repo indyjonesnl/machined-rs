@@ -13,6 +13,14 @@ use crate::{
     MountSpec, Platform, PlatformError, Result, CGROUP_DELEGATED, CGROUP_INIT_LEAF, CGROUP_ROOT,
 };
 
+/// `kexec_file_load(2)` syscall number. libc 0.2 defines `SYS_kexec_file_load`
+/// for x86_64-musl but NOT aarch64-musl, so pin the stable ABI numbers per arch
+/// (the project targets x86_64 + aarch64).
+#[cfg(target_arch = "x86_64")]
+const SYS_KEXEC_FILE_LOAD: libc::c_long = 320;
+#[cfg(target_arch = "aarch64")]
+const SYS_KEXEC_FILE_LOAD: libc::c_long = 294;
+
 pub struct LinuxPlatform;
 
 impl LinuxPlatform {
@@ -177,7 +185,7 @@ impl Platform for LinuxPlatform {
         // kernel+initrd (no KEXEC_FILE_NO_INITRAMFS).
         let rc = unsafe {
             libc::syscall(
-                libc::SYS_kexec_file_load,
+                SYS_KEXEC_FILE_LOAD,
                 kf.as_raw_fd(),
                 rf.as_raw_fd(),
                 c.as_bytes_with_nul().len() as libc::c_ulong,
