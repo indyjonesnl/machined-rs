@@ -123,14 +123,18 @@ grace-expired service kill is observable in the API rather than silent.
 | Bootable disk image + QEMU-verified boot (x86_64 + aarch64) | ✅ |
 | [aarch64 / Raspberry Pi 3A+ image](docs/raspberry-pi-3a-plus.md): QEMU boot (real SoC model) + manual hardware-verify | ✅ |
 | Atomic OS upgrade via in-process kexec (in-memory; M9a) | ✅ |
-| upgrade: disk A/B persistence + health-gated rollback (M9b) | 🔜 next |
+| Boot from disk via systemd-boot + disk-persistent A/B upgrade, survives a cold reboot (x86; M9b-1) | ✅ |
+| upgrade: health-gated auto-rollback to the previous slot (M9b-2) | 🔜 next |
 | Streaming logs/events RPCs, per-service health probes | 🔜 planned |
 
 There is an image now: `machined-imager` builds bootable x86_64, aarch64, and
 Raspberry Pi 3A+ disk images from pinned Alpine artifacts entirely in userspace
 — no root, no loop devices. CI boots the x86_64 and aarch64 images in QEMU and
-asserts the mTLS API answers and STATE+EPHEMERAL provision; the x86_64 run also
-drives a live v1→v2 kexec upgrade. The Pi image boots under `-M raspi3ap` (the
+asserts the mTLS API answers and STATE+EPHEMERAL provision. The x86_64 image
+boots **from disk** (UEFI/OVMF → systemd-boot → an A/B slot, no external kernel)
+and CI drives a v1→v2 upgrade that stages the new image to the inactive slot,
+flips the boot pointer, and **survives a cold reboot** with STATE+PKI intact. The
+Pi image boots under `-M raspi3ap` (the
 real BCM2837 SoC model) to prove the Pi kernel + machined come up, and its MBR
 `/boot` mount path is covered on `-M virt` (QEMU's raspi3 SD model can't expose
 the MBR partition table — the on-hardware SD/firmware handoff is verified on a
