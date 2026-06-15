@@ -7,7 +7,12 @@ use std::path::Path;
 
 /// The GPU firmware blobs a bcm2837 (Pi 3) boot needs, found under rootfs/boot/.
 const PI3_BLOBS: &[&str] = &["bootcode.bin", "start.elf", "fixup.dat"];
-const PI3_DTB: &str = "bcm2837-rpi-3-a-plus.dtb";
+/// The Pi 3A+ device tree. Staged into the FAT for the real firmware boot, and
+/// also emitted beside vmlinuz (`--emit-boot`) so the qemu raspi3ap boot-test
+/// can pass it via `-kernel … -dtb`: qemu's auto-generated raspi3ap dtb is
+/// incompatible with this Alpine linux-rpi kernel (it hangs in head.S before any
+/// serial), whereas the real board dtb boots cleanly.
+pub(crate) const PI3_DTB: &str = "bcm2837-rpi-3-a-plus.dtb";
 
 /// config.txt for a 64-bit Pi 3A+ booting kernel + initramfs (headless node).
 pub fn config_txt() -> &'static str {

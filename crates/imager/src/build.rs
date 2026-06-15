@@ -170,6 +170,14 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
         let boot_initrd = dir.join("initramfs.img");
         std::fs::write(&boot_initrd, &initrd)
             .with_context(|| format!("writing {}", boot_initrd.display()))?;
+        // Pi builds: also emit the board DTB (already staged into the FAT) so the
+        // qemu raspi3ap boot-test can pass `-dtb` — qemu's auto-generated dtb is
+        // incompatible with the Alpine linux-rpi kernel and hangs it before serial.
+        if cfg.rpi_firmware {
+            let dtb = crate::rpi::PI3_DTB;
+            std::fs::copy(staging.join(dtb), dir.join(dtb))
+                .with_context(|| format!("emit-boot DTB {dtb}"))?;
+        }
     }
     println!("image written to {}", o.out.display());
     Ok(())
