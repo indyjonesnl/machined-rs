@@ -30,6 +30,9 @@ x86_64 = [
   # Same .config otherwise (virtio/ext4/overlay/veth/bridge/nf_* =m, vmlinuz-virt).
   # Built via scripts/build-kexec-kernel.sh; host on a GHCR release + re-pin the sha.
   { name = "linux-virt", url = "https://github.com/indyjonesnl/machined-rs/releases/download/kernel-6.12.93-machined/custom-kernel-virt-6.12.93-machined.tar.gz", sha256 = "c5a60dec2e0e486c3af9fdcfc6b52152312d4fa110bc4e7d1edcc9855411458b", kind = "apk" },
+  # systemd-boot bootloader for the M9b-1 disk A/B boot path (staged to the FAT's
+  # EFI/BOOT/BOOTX64.EFI removable-media default that UEFI auto-loads).
+  { name = "systemd-boot", url = "https://github.com/indyjonesnl/machined-rs/releases/download/sdboot-252.39/systemd-bootx64.efi", sha256 = "10288fece5e90ce3ba3e7160f49695b022d648f7ef41774678db8c77774db167", kind = "sd-boot-efi" },
   { name = "musl", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/musl-1.2.5-r11.apk", sha256 = "61e84757a8bfbc0d7fa8f4ce6de9cd4d791714369d78f6a08e5b03510fb2a623", kind = "apk" },
   { name = "e2fsprogs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/e2fsprogs-1.47.1-r1.apk", sha256 = "f778a891aa832f40cf3be200b8ac346540c87fb90063e843f0d74044cff0b9c5", kind = "apk" },
   { name = "e2fsprogs-libs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/e2fsprogs-libs-1.47.1-r1.apk", sha256 = "728d6d3c4d2f3a8d4384f64b00811f47c2ad1760f52b9e1ac82f88216c8fcbb3", kind = "apk" },
@@ -48,6 +51,9 @@ x86_64 = [
 # closure as x86_64 (musl interpreter is /lib/ld-musl-aarch64.so.1 here).
 aarch64 = [
   { name = "linux-virt", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/linux-virt-6.12.93-r0.apk", sha256 = "6816957eb3e706732e7c81534fdb27bcb17684c6f47a6a2a47bfa8d756080e57", kind = "apk" },
+  # systemd-boot bootloader for the M9b-1 disk A/B boot path (staged to the FAT's
+  # EFI/BOOT/BOOTAA64.EFI removable-media default that UEFI auto-loads).
+  { name = "systemd-boot", url = "https://github.com/indyjonesnl/machined-rs/releases/download/sdboot-252.39/systemd-bootaa64.efi", sha256 = "e11ba35ebe4f4b78d4569a63fe30b4a9d033ab92b83cda375e645ac76330b49f", kind = "sd-boot-efi" },
   { name = "musl", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/musl-1.2.5-r11.apk", sha256 = "721010e6bff908878d9c527428598661be59dde0d9f013f8431d01fd4dd16652", kind = "apk" },
   { name = "e2fsprogs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/e2fsprogs-1.47.1-r1.apk", sha256 = "c28dddb51a40a91820a9f0dcd32f19abf23c8256543d7afc4f87363b28885a66", kind = "apk" },
   { name = "e2fsprogs-libs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/e2fsprogs-libs-1.47.1-r1.apk", sha256 = "c817ddefbfa19245cce0c62820a1eb50c771f4999232d0a1c9e57521a58508d3", kind = "apk" },

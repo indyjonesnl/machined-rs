@@ -102,6 +102,20 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
                 let dst = staging.join(CNI_BIN_SUBDIR);
                 crate::boot::extract_cni_plugins(&path, &dst, CNI_WANTED_PLUGINS)?;
             }
+            "sd-boot-efi" => {
+                // Firmware's removable-media fallback path. x86_64 → BOOTX64.EFI,
+                // aarch64 → BOOTAA64.EFI; both are the same systemd-boot binary
+                // for that arch, just at the path UEFI auto-loads.
+                let efi_name = match o.arch {
+                    "aarch64" => "BOOTAA64.EFI",
+                    _ => "BOOTX64.EFI",
+                };
+                let dst = staging.join("EFI/BOOT").join(efi_name);
+                std::fs::create_dir_all(dst.parent().unwrap())
+                    .with_context(|| format!("create {}", dst.parent().unwrap().display()))?;
+                std::fs::copy(&path, &dst)
+                    .with_context(|| format!("stage sd-boot {}", dst.display()))?;
+            }
             k => anyhow::bail!("unknown artifact kind {k} for {}", a.name),
         }
     }

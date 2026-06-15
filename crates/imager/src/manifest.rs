@@ -20,7 +20,8 @@ pub struct Artifact {
     /// single .tar.gz); "boot-binary" → /boot/bin/<rename|name>;
     /// "oci-image" → /boot/images/<rename|name> (a pre-baked OCI archive);
     /// "cni-plugins" → /boot/cni/bin/{bridge,host-local,loopback} (from a
-    /// cni-plugins-*.tgz).
+    /// cni-plugins-*.tgz);
+    /// "sd-boot-efi" → /EFI/BOOT/BOOT<ARCH>.EFI (systemd-boot).
     pub kind: String,
     /// For "boot-binary": the filename to stage as (e.g. runc). Ignored otherwise.
     #[serde(default)]
@@ -102,6 +103,13 @@ kind = "apk"
         assert!(arm.iter().any(|a| a.name == "runc"
             && a.kind == "boot-binary"
             && a.rename.as_deref() == Some("runc")));
+        // M9b-1: systemd-boot EFI binary pinned for the GPT (UEFI) arches.
+        assert!(x86
+            .iter()
+            .any(|a| a.name == "systemd-boot" && a.kind == "sd-boot-efi"));
+        assert!(arm
+            .iter()
+            .any(|a| a.name == "systemd-boot" && a.kind == "sd-boot-efi"));
         // aarch64-rpi section: Pi kernel + GPU firmware apks + arm64 runtime.
         let rpi = m.for_arch("aarch64-rpi").expect("aarch64-rpi arch present");
         assert!(rpi.iter().any(|a| a.name == "linux-rpi" && a.kind == "apk"));
