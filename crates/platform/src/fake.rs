@@ -56,6 +56,11 @@ impl FakePlatform {
     pub fn mounts(&self) -> Vec<MountSpec> {
         self.recorded.lock().unwrap().mounts.clone()
     }
+
+    /// Remounts issued as `(target, rw)`, in call order (test inspection).
+    pub fn remounts(&self) -> Vec<(String, bool)> {
+        self.recorded.lock().unwrap().remounts.clone()
+    }
 }
 
 impl Platform for FakePlatform {

@@ -105,7 +105,9 @@ impl BootloaderBackend for SdBootBackend {
             }
             Ok(())
         })();
-        let _ = self.platform.remount_ro(&esp);
+        if let Err(e) = self.platform.remount_ro(&esp) {
+            tracing::warn!("remount {esp} ro failed: {e}");
+        }
         res?;
         Ok(slot)
     }
@@ -116,9 +118,22 @@ impl BootloaderBackend for SdBootBackend {
         self.platform
             .remount_rw(&esp)
             .map_err(|e| anyhow::anyhow!("remount {esp} rw: {e}"))?;
-        let res = std::fs::write(&conf, format!("default {}\ntimeout 0\n", slot.id()))
-            .map_err(anyhow::Error::from);
-        let _ = self.platform.remount_ro(&esp);
+        let res = (|| -> std::io::Result<()> {
+            std::fs::write(&conf, format!("default {}\ntimeout 0\n", slot.id()))?;
+            // loader.conf is THE A/B boot pointer: a torn/empty write that
+            // survives a power cut leaves systemd-boot unable to parse either
+            // slot. fsync the file AND the loader/ dir (best-effort) so the
+            // flip is durable before we re-seal the ESP ro.
+            let _ = std::fs::File::open(&conf).and_then(|f| f.sync_all());
+            if let Some(parent) = conf.parent() {
+                let _ = std::fs::File::open(parent).and_then(|d| d.sync_all());
+            }
+            Ok(())
+        })()
+        .map_err(anyhow::Error::from);
+        if let Err(e) = self.platform.remount_ro(&esp) {
+            tracing::warn!("remount {esp} ro failed: {e}");
+        }
         res.with_context(|| format!("write {}", conf.display()))
     }
 }
@@ -153,11 +168,9 @@ mod tests {
         std::fs::write(dir.path().join("vmlinuz"), b"K2").unwrap();
         std::fs::write(dir.path().join("initramfs.img"), b"I2").unwrap();
 
-        let be = SdBootBackend::new(
-            &esp,
-            std::sync::Arc::new(FakePlatform::new()),
-            "machined.slot=a",
-        );
+        let fake = std::sync::Arc::new(FakePlatform::new());
+        let be = SdBootBackend::new(&esp, fake.clone(), "machined.slot=a");
+        let esp_s = esp.to_string_lossy().to_string();
         let slot = be
             .stage_inactive(
                 &dir.path().join("vmlinuz"),
@@ -167,11 +180,26 @@ mod tests {
         assert_eq!(slot, Slot::B);
         assert_eq!(std::fs::read(esp.join("B/vmlinuz")).unwrap(), b"K2");
         assert_eq!(std::fs::read(esp.join("B/initramfs.img")).unwrap(), b"I2");
+        // The staging window must remount the ESP rw then re-seal it ro.
+        assert_eq!(
+            fake.remounts(),
+            vec![(esp_s.clone(), true), (esp_s.clone(), false)]
+        );
 
         be.set_active(Slot::B).unwrap();
         assert_eq!(
             std::fs::read_to_string(esp.join("loader/loader.conf")).unwrap(),
             "default b\ntimeout 0\n"
+        );
+        // set_active opens a second rw/ro window: ESP must end up ro again.
+        assert_eq!(
+            fake.remounts(),
+            vec![
+                (esp_s.clone(), true),
+                (esp_s.clone(), false),
+                (esp_s.clone(), true),
+                (esp_s.clone(), false),
+            ]
         );
     }
 }
