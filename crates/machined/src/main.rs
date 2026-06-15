@@ -419,6 +419,10 @@ async fn run_daemon() -> anyhow::Result<()> {
             &cmdline,
         ))
     };
+    info!(
+        "booted from A/B slot {}",
+        upgrade_backend.current_slot().id()
+    );
 
     let ctx = SequencerCtx {
         state,

@@ -159,6 +159,9 @@ mod tests {
         fail_set_active: bool,
     }
     impl crate::bootloader::BootloaderBackend for StubBackend {
+        fn current_slot(&self) -> Slot {
+            Slot::A
+        }
         fn stage_inactive(&self, _k: &Path, _i: &Path) -> anyhow::Result<Slot> {
             *self.staged.lock().unwrap() = Some(Slot::B);
             Ok(Slot::B)
