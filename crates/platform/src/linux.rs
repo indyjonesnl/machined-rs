@@ -158,22 +158,37 @@ impl Platform for LinuxPlatform {
     }
 
     fn kexec_load(&self, kernel: &Path, initrd: &Path, cmdline: &str) -> Result<()> {
-        // The kernel lacks CONFIG_KEXEC_FILE, so machined uses the kexec-tools
-        // `kexec` binary (CONFIG_KEXEC=y / kexec_load(2)). `kexec -l` stages the
-        // image; reboot_kexec()'s reboot(RB_KEXEC) jumps into it. The kexec-tools
-        // apk stages the binary at /usr/sbin/kexec; use the absolute path (the
-        // M8b lesson — don't rely on PATH).
-        let out = std::process::Command::new("/usr/sbin/kexec")
-            .arg("-l")
-            .arg(kernel)
-            .arg(format!("--initrd={}", initrd.display()))
-            .arg(format!("--command-line={cmdline}"))
-            .output()
-            .map_err(|e| PlatformError::Other(format!("spawn kexec -l: {e}")))?;
-        if !out.status.success() {
+        // In-process kexec_file_load(2): machined (PID1) has CAP_SYS_BOOT in its
+        // effective set, and the file syscall is not gated by the one-way
+        // kexec_load_disabled sysctl — so no `kexec` userspace binary, no cap
+        // juggling, no PID1-reaper subprocess race. Needs CONFIG_KEXEC_FILE=y in
+        // the kernel (the machined-built kernel enables it; stock Alpine does
+        // not). reboot_kexec()'s reboot(RB_KEXEC) jumps into the loaded image.
+        use std::os::fd::AsRawFd;
+        let kf = fs::File::open(kernel)
+            .map_err(|e| PlatformError::Other(format!("open kernel {}: {e}", kernel.display())))?;
+        let rf = fs::File::open(initrd)
+            .map_err(|e| PlatformError::Other(format!("open initrd {}: {e}", initrd.display())))?;
+        // cmdline must be NUL-terminated; the length passed includes the NUL.
+        let c = std::ffi::CString::new(cmdline)
+            .map_err(|e| PlatformError::Other(format!("cmdline: {e}")))?;
+        // SAFETY: the fds are valid for the duration of the call; the cmdline
+        // ptr/len describe a valid NUL-terminated buffer; flags=0 loads
+        // kernel+initrd (no KEXEC_FILE_NO_INITRAMFS).
+        let rc = unsafe {
+            libc::syscall(
+                libc::SYS_kexec_file_load,
+                kf.as_raw_fd(),
+                rf.as_raw_fd(),
+                c.as_bytes_with_nul().len() as libc::c_ulong,
+                c.as_ptr(),
+                0 as libc::c_ulong,
+            )
+        };
+        if rc != 0 {
             return Err(PlatformError::Other(format!(
-                "kexec -l failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
+                "kexec_file_load: {}",
+                std::io::Error::last_os_error()
             )));
         }
         Ok(())

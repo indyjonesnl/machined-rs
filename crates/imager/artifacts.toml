@@ -25,7 +25,11 @@
 
 [artifact]
 x86_64 = [
-  { name = "linux-virt", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/linux-virt-6.12.93-r0.apk", sha256 = "46851b49c0c8f7d689315556caff54df457238fd9c575b4e16837031a6653c27", kind = "apk" },
+  # Custom kernel: Alpine linux-virt 6.12.93 .config + CONFIG_KEXEC_FILE=y (stock
+  # Alpine ships it off; machined's in-process kexec_file_load upgrade needs it).
+  # Same .config otherwise (virtio/ext4/overlay/veth/bridge/nf_* =m, vmlinuz-virt).
+  # Built via scripts/build-kexec-kernel.sh; host on a GHCR release + re-pin the sha.
+  { name = "linux-virt", url = "https://github.com/indyjonesnl/machined-rs/releases/download/kernel-6.12.93-machined/custom-kernel-virt-6.12.93-machined.tar.gz", sha256 = "c5a60dec2e0e486c3af9fdcfc6b52152312d4fa110bc4e7d1edcc9855411458b", kind = "apk" },
   { name = "musl", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/musl-1.2.5-r11.apk", sha256 = "61e84757a8bfbc0d7fa8f4ce6de9cd4d791714369d78f6a08e5b03510fb2a623", kind = "apk" },
   { name = "e2fsprogs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/e2fsprogs-1.47.1-r1.apk", sha256 = "f778a891aa832f40cf3be200b8ac346540c87fb90063e843f0d74044cff0b9c5", kind = "apk" },
   { name = "e2fsprogs-libs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/e2fsprogs-libs-1.47.1-r1.apk", sha256 = "728d6d3c4d2f3a8d4384f64b00811f47c2ad1760f52b9e1ac82f88216c8fcbb3", kind = "apk" },
@@ -33,14 +37,6 @@ x86_64 = [
   { name = "libblkid", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libblkid-2.40.4-r1.apk", sha256 = "74dbd807a8e2a7e88bbdbd0a30329c467e7d6512c03644e373ef12d14d28e817", kind = "apk" },
   { name = "libeconf", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libeconf-0.6.3-r0.apk", sha256 = "9bcd1c0d8fafa5532a0fe3c76a24dbbe06ef05d2f2c106c55074552251b446f0", kind = "apk" },
   { name = "libuuid", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/libuuid-2.40.4-r1.apk", sha256 = "67dd6b9a714841008389bfa5cb4e42fd0539cd873eaf904481babee49eb11454", kind = "apk" },
-  # kexec-tools: the `kexec` userspace binary machined shells for upgrades.
-  # The kernel lacks CONFIG_KEXEC_FILE (kexec_file_load → ENOSYS) but has
-  # CONFIG_KEXEC=y, so `kexec -l` (kexec_load(2)) works; reboot(RB_KEXEC) fires it.
-  # The apk stages the binary at /usr/sbin/kexec (machined shells the absolute path).
-  # NEEDED libs beyond musl: liblzma.so.5 (xz-libs), libz.so.1 (zlib).
-  { name = "kexec-tools", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/community/x86_64/kexec-tools-2.0.30-r0.apk", sha256 = "53d3e25ca6556d7fd1dbdc10e1f70b8c84fb5272d72a2f0bbda562bf9e80d2b9", kind = "apk" },
-  { name = "xz-libs", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/xz-libs-5.8.3-r0.apk", sha256 = "0a6e2ffa63da3314193103cc33dd0bb07a7c0683cc0001fde1fa0cf036a7ddeb", kind = "apk" },
-  { name = "zlib", url = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/zlib-1.3.2-r0.apk", sha256 = "b224a975eb04ec3ec9bce7db2fce91c9e9d669996f79a9a750d4a3cd9324a404", kind = "apk" },
   # GitHub-release static binaries staged to /boot/bin (NOT Alpine apks → initramfs):
   { name = "containerd", url = "https://github.com/containerd/containerd/releases/download/v2.0.9/containerd-static-2.0.9-linux-amd64.tar.gz", sha256 = "6cd7dc915982271ab634193ad7746cf2c7ef07fb4f37cf6f662b2bdcb6678013", kind = "boot-tarball" },
   { name = "runc", url = "https://github.com/opencontainers/runc/releases/download/v1.4.3/runc.amd64", sha256 = "f6ae8efc0fa40079e1475e97cbe9d1bd3f106a28d6af78a11d9f1bd565515e60", kind = "boot-binary", rename = "runc" },
