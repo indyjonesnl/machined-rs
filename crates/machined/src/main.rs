@@ -1,5 +1,10 @@
 //! machined — PID 1 / machine-management daemon entrypoint.
 
+// Consumers (SdBootBackend impl + upgrade-flow wiring) land in Task 4 within
+// this crate; until then the trait/Slot helpers are unused and would trip
+// `dead_code` under CI's `-D warnings`.
+#[allow(dead_code)]
+mod bootloader;
 mod emergency;
 mod imageboot;
 mod pid1;
