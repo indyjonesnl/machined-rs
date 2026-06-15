@@ -120,18 +120,23 @@ grace-expired service kill is observable in the API rather than silent.
 | Payload bring-up gated on runtime readiness | ✅ |
 | Graceful stop: SIGTERM→grace→kill (process groups), sync+unmount | ✅ |
 | Reset: wipe STATE+EPHEMERAL → reboot → reprovision | ✅ |
-| Bootable disk image + QEMU-verified boot (x86_64) | ✅ |
-| [aarch64 / Raspberry Pi 3A+ image (build + manual-verify)](docs/raspberry-pi-3a-plus.md) | ✅ |
-| upgrade/kexec | 🔜 next |
+| Bootable disk image + QEMU-verified boot (x86_64 + aarch64) | ✅ |
+| [aarch64 / Raspberry Pi 3A+ image](docs/raspberry-pi-3a-plus.md): QEMU boot (real SoC model) + manual hardware-verify | ✅ |
+| Atomic OS upgrade via in-process kexec (in-memory; M9a) | ✅ |
+| upgrade: disk A/B persistence + health-gated rollback (M9b) | 🔜 next |
 | Streaming logs/events RPCs, per-service health probes | 🔜 planned |
 
-There is an image now: `machined-imager` builds a bootable x86_64 disk image
-from pinned Alpine artifacts entirely in userspace — no root, no loop devices —
-and CI boots it in QEMU and asserts the mTLS API answers and STATE+EPHEMERAL
-provision (`make boot-test`). What's still pending is x86 bare-metal self-boot
-and the ARM/Pi image (M7b/M7c). Either way the full lifecycle also runs in the
-test suite, and every subsystem can be driven against its fake backend on any
-Linux machine.
+There is an image now: `machined-imager` builds bootable x86_64, aarch64, and
+Raspberry Pi 3A+ disk images from pinned Alpine artifacts entirely in userspace
+— no root, no loop devices. CI boots the x86_64 and aarch64 images in QEMU and
+asserts the mTLS API answers and STATE+EPHEMERAL provision; the x86_64 run also
+drives a live v1→v2 kexec upgrade. The Pi image boots under `-M raspi3ap` (the
+real BCM2837 SoC model) to prove the Pi kernel + machined come up, and its MBR
+`/boot` mount path is covered on `-M virt` (QEMU's raspi3 SD model can't expose
+the MBR partition table — the on-hardware SD/firmware handoff is verified on a
+real Pi, see [docs/raspberry-pi-3a-plus.md](docs/raspberry-pi-3a-plus.md)). The
+full lifecycle also runs in the test suite, and every subsystem can be driven
+against its fake backend on any Linux machine.
 
 ## Build & test
 
@@ -139,8 +144,11 @@ Linux machine.
 cargo build --workspace
 make pre-commit     # fmt + clippy -D warnings + full test suite (root-free)
 make root-tests     # privileged tier: loop devices, netns, clock, real containerd
-make boot-test      # build the x86_64 image + boot it in QEMU; asserts API + provisioning
-make build-image-aarch64-rpi   # build the Pi 3A+ SD image (no boot; verify on hardware — see docs/raspberry-pi-3a-plus.md)
+make boot-test              # x86_64 image → QEMU boot; asserts API + provisioning + live kexec upgrade
+make boot-test-aarch64      # aarch64 image → QEMU -M virt boot; asserts API + provisioning
+make boot-test-aarch64-rpi  # Pi 3A+ image → QEMU -M raspi3ap (real SoC model); asserts machined boots
+make boot-test-aarch64-mbr  # aarch64 MBR image → QEMU -M virt; asserts the Pi's MBR /boot mount path
+make build-image-aarch64-rpi   # build the Pi 3A+ SD image (verify on hardware — see docs/raspberry-pi-3a-plus.md)
 ```
 
 No system `protoc` needed — protobuf codegen uses a vendored binary.
@@ -155,7 +163,7 @@ green suite. Read [`docs/superpowers/specs/`](docs/superpowers/specs/) to see
 
 Good entry points if you want to contribute:
 
-- **Bare-metal & Pi boot** — x86 self-boot machinery and the aarch64/Pi image (M7b/M7c).
+- **Upgrade rollback (M9b)** — persist the kexec'd image to A/B disk slots + health-gated rollback.
 - **Streaming RPCs** — `machinectl logs`/`events` over the existing API.
 - **Per-service health probes** — HTTP/exec checks feeding the readiness gate.
 - **cgroups** — resource limits for supervised services.
