@@ -121,9 +121,15 @@ kind = "apk"
         // aarch64-mbr has no artifact section of its own; it reuses aarch64's.
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("artifacts.toml");
         let m = Manifest::load(&path).expect("artifacts.toml parses");
-        let mbr = m.for_arch("aarch64-mbr").expect("aarch64-mbr aliases aarch64");
+        let mbr = m
+            .for_arch("aarch64-mbr")
+            .expect("aarch64-mbr aliases aarch64");
         let arm = m.for_arch("aarch64").expect("aarch64 present");
         let names = |a: &[Artifact]| a.iter().map(|x| x.name.clone()).collect::<Vec<_>>();
-        assert_eq!(names(mbr), names(arm), "aarch64-mbr must reuse aarch64 pins");
+        assert_eq!(
+            names(mbr),
+            names(arm),
+            "aarch64-mbr must reuse aarch64 pins"
+        );
     }
 }
