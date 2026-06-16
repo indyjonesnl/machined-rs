@@ -32,11 +32,12 @@ assert raw[512:520] != b"EFI PART", "unexpected GPT header"
 print(f"MBR OK: bootable FAT32 primary at LBA {lba}")
 PY
 
-# Assert the FAT carries the Pi boot files. Walk the FAT32 root directory with
-# python (no mount/losetup needed) and collect the long file names: every Pi
-# boot file has an LFN entry storing the literal lowercase name. Parsing the
-# directory (rather than grepping raw bytes) avoids matching the file *contents*
-# of the staged initramfs/blobs, so the check can't pass vacuously.
+# Assert the FAT carries the A/B os_prefix slot layout. Walk the FAT32 directory
+# tree recursively with python (no mount/losetup needed): config.txt + firmware
+# blobs live at the root, the full slot (kernel/initramfs/dtb/cmdline/overlays)
+# in /A, and the scaffold-only slot (dtb/cmdline/overlays, NO kernel yet) in /B.
+# Parsing the directory entries (rather than grepping raw bytes) avoids matching
+# the staged initramfs/blob *contents*, so the check can't pass vacuously.
 python3 - "$IMG" <<'PY'
 import sys, struct
 data = open(sys.argv[1], "rb").read()
@@ -56,32 +57,60 @@ def clus_bytes(c):
     sec = first_data + (c - 2) * spc
     off = base + sec * bps
     return data[off:off + spc * bps]
-# Walk the root-dir cluster chain.
-entries, clus, guard = b"", root_clus, 0
-while 2 <= clus < 0x0FFFFFF8 and guard < 100000:
-    entries += clus_bytes(clus); clus = fat_entry(clus); guard += 1
+def chain_bytes(first):
+    out, c, guard = b"", first, 0
+    while 2 <= c < 0x0FFFFFF8 and guard < 100000:
+        out += clus_bytes(c); c = fat_entry(c); guard += 1
+    return out
 def dec_lfn(e):
     return (e[1:11] + e[14:26] + e[28:32]).decode("utf-16-le", "replace").split("\x00")[0]
-names, lfn = set(), ""
-for i in range(0, len(entries), 32):
-    e = entries[i:i + 32]
-    if len(e) < 32 or e[0] == 0x00:
-        break
-    if e[0] == 0xE5:
-        lfn = ""; continue
-    if e[11] == 0x0F:            # LFN component
-        lfn = dec_lfn(e) + lfn; continue
-    short = e[0:8].rstrip().decode("latin1")
-    ext = e[8:11].rstrip().decode("latin1")
-    short_name = short + ("." + ext if ext else "")
-    names.add(lfn or short_name); lfn = ""
-want = ["config.txt", "cmdline.txt", "bootcode.bin", "start.elf", "fixup.dat",
-        "vmlinuz", "initramfs.img", "bcm2837-rpi-3-a-plus.dtb"]
-missing = [w for w in want if w not in names]
-if missing:
-    print("MISSING from FAT root dir:", missing)
-    print("present:", sorted(names)); sys.exit(1)
-print("FAT carries the Pi boot files: " + ", ".join(want))
+def read_dir(first):
+    """name -> ('dir'|'file', first_cluster) for the directory at cluster `first`."""
+    entries, lfn, out = chain_bytes(first), "", {}
+    for i in range(0, len(entries), 32):
+        e = entries[i:i + 32]
+        if len(e) < 32 or e[0] == 0x00:
+            break
+        if e[0] == 0xE5:
+            lfn = ""; continue
+        if e[11] == 0x0F:
+            lfn = dec_lfn(e) + lfn; continue
+        short = e[0:8].rstrip().decode("latin1")
+        ext = e[8:11].rstrip().decode("latin1")
+        name = lfn or (short + ("." + ext if ext else "")); lfn = ""
+        if name in (".", ".."):
+            continue
+        fc = (struct.unpack("<H", e[20:22])[0] << 16) | struct.unpack("<H", e[26:28])[0]
+        out[name] = ("dir" if (e[11] & 0x10) else "file", fc)
+    return out
+def need(d, name, kind, where):
+    assert name in d, f"missing {name} in {where} (have {sorted(d)})"
+    assert d[name][0] == kind, f"{where}/{name} is {d[name][0]}, want {kind}"
+    return d[name][1]
+def text(first):  # whole clusters (trailing padding is harmless for substring checks)
+    return chain_bytes(first).decode("latin1")
+
+root = read_dir(root_clus)
+# Root: config.txt + firmware blobs; the kernel/initramfs/dtb/cmdline are now in /A.
+for f in ["config.txt", "bootcode.bin", "start.elf", "fixup.dat"]:
+    need(root, f, "file", "root")
+for f in ["vmlinuz", "initramfs.img", "cmdline.txt", "bcm2837-rpi-3-a-plus.dtb"]:
+    assert f not in root, f"{f} must NOT be at FAT root (moved into /A)"
+assert "os_prefix=A/" in text(root["config.txt"][1]), "config.txt missing os_prefix=A/"
+a = read_dir(need(root, "A", "dir", "root"))
+b = read_dir(need(root, "B", "dir", "root"))
+# Slot A: full (kernel staged here at build).
+for f in ["vmlinuz", "initramfs.img", "bcm2837-rpi-3-a-plus.dtb", "cmdline.txt"]:
+    need(a, f, "file", "A")
+assert "disable-bt.dtbo" in read_dir(need(a, "overlays", "dir", "A")), "A/overlays/disable-bt.dtbo missing"
+assert "machined.slot=a" in text(a["cmdline.txt"][1]), "A/cmdline.txt missing machined.slot=a"
+# Slot B: scaffolding only — NO kernel until the first upgrade.
+for f in ["bcm2837-rpi-3-a-plus.dtb", "cmdline.txt"]:
+    need(b, f, "file", "B")
+assert "vmlinuz" not in b, "B/vmlinuz must be absent until the first upgrade"
+assert "disable-bt.dtbo" in read_dir(need(b, "overlays", "dir", "B")), "B/overlays/disable-bt.dtbo missing"
+assert "machined.slot=b" in text(b["cmdline.txt"][1]), "B/cmdline.txt missing machined.slot=b"
+print("A/B os_prefix slot layout OK: root=config.txt+blobs, /A=full slot, /B=scaffold")
 PY
 
-echo "aarch64-rpi image built + Pi boot files present: BUILD CHECK PASSED"
+echo "aarch64-rpi A/B image built + os_prefix slot layout verified: BUILD CHECK PASSED"
