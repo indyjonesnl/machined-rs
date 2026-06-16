@@ -1,6 +1,8 @@
-//! Raspberry Pi firmware staging onto the FAT boot partition: copy the GPU
-//! blobs (bootcode.bin, start.elf, fixup.dat) + the Pi 3A+ DTB from the
-//! extracted rootfs, and generate config.txt / cmdline.txt.
+//! Raspberry Pi boot staging onto the FAT boot partition: GPU firmware blobs
+//! (bootcode.bin, start.elf, fixup.dat) + config.txt (with os_prefix=A/) at the
+//! root, and self-contained A/B slot dirs (/A, /B) each holding the dtb,
+//! overlays (disable-bt), and a per-slot cmdline.txt. The kernel+initramfs are
+//! moved into /A by move_kernel_to_slot_a.
 
 use anyhow::Context;
 use std::path::Path;
@@ -170,5 +172,20 @@ mod tests {
         std::fs::create_dir_all(&staging).unwrap();
         let err = stage_pi_firmware(&rootfs, &staging).unwrap_err();
         assert!(err.to_string().contains("bootcode.bin"), "{err}");
+    }
+
+    #[test]
+    fn missing_overlay_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let (rootfs, staging) = (dir.path().join("rootfs"), dir.path().join("staging"));
+        std::fs::create_dir_all(rootfs.join("boot/overlays")).unwrap();
+        std::fs::create_dir_all(&staging).unwrap();
+        for f in PI3_BLOBS {
+            std::fs::write(rootfs.join("boot").join(f), f.as_bytes()).unwrap();
+        }
+        std::fs::write(rootfs.join("boot").join(PI3_DTB), b"dtb").unwrap();
+        // overlay deliberately absent
+        let err = stage_pi_firmware(&rootfs, &staging).unwrap_err();
+        assert!(err.to_string().contains("disable-bt.dtbo"), "{err}");
     }
 }
