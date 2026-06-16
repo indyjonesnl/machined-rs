@@ -1,6 +1,6 @@
 //! Boot-slot selection for A/B disk upgrades. A BootloaderBackend abstracts the
-//! per-platform bootloader: SdBootBackend (UEFI/systemd-boot) here; a future
-//! PiBootBackend over config.txt os_prefix. The upgrade flow is backend-agnostic.
+//! per-platform bootloader: SdBootBackend (UEFI/systemd-boot) and PiBootBackend
+//! (Raspberry Pi, config.txt os_prefix). The upgrade flow is backend-agnostic.
 
 use anyhow::Context as _;
 use machined_platform::Platform;
