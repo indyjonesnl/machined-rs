@@ -24,6 +24,7 @@ Power on; the GPU firmware loads `bootcode.bin -> start.elf`, then the kernel +
 initramfs. On serial:
 - the kernel boots (Linux 6.12.13-...-rpi)
 - `machined starting (pid 1)`
+- `booted from A/B slot a` (a fresh image boots slot A — see the A/B section below)
 - `mounted boot partition /dev/mmcblk0p1 at /boot` (the vfat fallback)
 - `seeded PKI from /boot/pki`
 - `management API listening on 0.0.0.0:50000`
@@ -36,6 +37,52 @@ Plug a USB-Ethernet adapter into the Pi's USB port; it appears as a wired NIC.
 Add a `network.interfaces` entry to `node-pi.yaml` for it (static IP), rebuild,
 reflash. Then from your workstation:
 `machinectl --bundle /tmp/pki/machinectl --endpoint https://<pi-ip>:50000 version`.
+
+## A/B upgrade (atomic, cold-reboot)
+The Pi image is laid out for A/B updates. `config.txt` carries `os_prefix=A/`,
+which the VideoCore firmware prepends when loading a self-contained slot dir
+(`/A` or `/B`) — each holds `vmlinuz`, `initramfs.img`, the dtb, `cmdline.txt`,
+and `overlays/disable-bt.dtbo`. The firmware blobs + `config.txt` itself stay at
+the FAT root. machined upgrades by staging the inactive slot, then flipping the
+`os_prefix` line to point at it.
+
+The end-to-end upgrade can't be tested in QEMU (no firmware) — verify on real
+hardware over serial. The Pi 3A+ has no Ethernet, so the node needs the
+USB-Ethernet adapter from the section above to reach the bundle.
+
+1. Build a v2 bundle on your workstation:
+   ```
+   target/release/machined-imager build --arch aarch64-rpi \
+     --machined target/aarch64-unknown-linux-musl/release/machined \
+     --config examples/node-pi.yaml --pki-dir /tmp/pki \
+     --image-id v2 --out /tmp/machined-pi-v2.img --emit-boot /tmp/boot-v2
+   tar -czf /tmp/bundle.tgz -C /tmp/boot-v2 vmlinuz initramfs.img
+   sha256sum /tmp/bundle.tgz
+   ```
+2. Serve it where the Pi can reach it: `cd /tmp && python3 -m http.server 8080`.
+3. On the running v1 node (booted from slot A), trigger the upgrade:
+   ```
+   machinectl --bundle /tmp/pki/machinectl --endpoint https://<pi-ip>:50000 \
+     upgrade http://<workstation-ip>:8080/bundle.tgz <sha256-from-step-1>
+   ```
+4. machined downloads + verifies the bundle, stages it into the inactive slot
+   `/B`, flips `config.txt` to `os_prefix=B/`, and reboots. Over serial you'll
+   see it reboot, then the firmware boots `/B`.
+5. Confirm the upgrade: over serial, machined logs `booted from A/B slot b`; and
+   `machinectl … version` reports `image_id=v2`. The previous slot `/A` is
+   untouched — it's the rollback target.
+
+**Manual rollback:** to revert to v1, flip the pointer back. Mount the FAT boot
+partition on your workstation (or edit on the Pi if writable) and change
+`config.txt`'s `os_prefix=B/` back to `os_prefix=A/`, then reboot → the firmware
+boots `/A` (v1). machined does not yet do automatic health-gated rollback —
+that's a later milestone.
+
+**Watch-out:** if the serial console goes dark after an upgrade, check that the
+new slot has `overlays/disable-bt.dtbo`. `os_prefix` prepends to overlay paths,
+and `disable-bt` is what puts the PL011 UART on the GPIO header. The imager
+stages it into both slots; this is the first thing to check if a slot boots
+silent.
 
 ## Known hardware-gated items (report if they differ)
 - **MBR vs GPT:** the image is MBR (Pi 3 firmware reads MBR). If a future Pi
