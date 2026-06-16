@@ -191,6 +191,11 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
         };
         crate::sdboot::assemble(&staging, cmdline)?;
     }
+    // Pi (MBR): move the kernel+initramfs into slot A; config.txt's os_prefix=A/
+    // selects it. The slot dirs were scaffolded by stage_pi_firmware.
+    if cfg.rpi_firmware {
+        crate::rpi::move_kernel_to_slot_a(&staging)?;
+    }
     image::write_image(o.out, o.size, &staging, cfg.scheme)?;
     if let Some(dir) = o.emit_boot {
         std::fs::create_dir_all(dir)
@@ -206,7 +211,7 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
         // incompatible with the Alpine linux-rpi kernel and hangs it before serial.
         if cfg.rpi_firmware {
             let dtb = crate::rpi::PI3_DTB;
-            std::fs::copy(staging.join(dtb), dir.join(dtb))
+            std::fs::copy(staging.join("A").join(dtb), dir.join(dtb))
                 .with_context(|| format!("emit-boot DTB {dtb}"))?;
         }
     }
