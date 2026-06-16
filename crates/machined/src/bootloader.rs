@@ -176,8 +176,6 @@ fn rewrite_os_prefix(config: &str, slot: Slot) -> anyhow::Result<String> {
 /// stage_inactive writes the inactive slot's kernel+initramfs (the dtb,
 /// cmdline.txt and overlays are scaffolded into the slot by the imager);
 /// set_active flips config.txt's os_prefix line.
-// consumed in Task 2 (main.rs backend selection)
-#[allow(dead_code)]
 pub struct PiBootBackend {
     esp: std::path::PathBuf,
     platform: Arc<dyn Platform>,
@@ -185,8 +183,6 @@ pub struct PiBootBackend {
 }
 
 impl PiBootBackend {
-    // consumed in Task 2 (main.rs backend selection)
-    #[allow(dead_code)]
     pub fn new(
         esp: impl Into<std::path::PathBuf>,
         platform: Arc<dyn Platform>,

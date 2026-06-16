@@ -145,7 +145,15 @@ pub fn build(fetcher: &dyn Fetch, o: &BuildOpts) -> anyhow::Result<()> {
 
     // 4. Initramfs carries ONLY the resolved closure, not all modules.
     prune_for_initramfs(&rootfs, &kver, &mods)?;
-    let initrd = initramfs::build_initramfs(&rootfs, o.machined, &mods, &kver, o.image_id)?;
+    let bootloader_kind = if cfg.rpi_firmware { "pi" } else { "sdboot" };
+    let initrd = initramfs::build_initramfs(
+        &rootfs,
+        o.machined,
+        &mods,
+        &kver,
+        o.image_id,
+        bootloader_kind,
+    )?;
 
     // 5. Stage the FAT tree and write the image. (staging/ and staging/bin were
     // created before the fetch loop so boot artifacts could land in /boot/bin.)

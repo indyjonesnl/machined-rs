@@ -229,6 +229,15 @@ fn read_image_id() -> String {
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
+/// The bootloader backend baked into this initramfs by the imager
+/// (/etc/machined/bootloader): "pi" → PiBootBackend, anything else → sdboot.
+/// Absent/unreadable → "sdboot" (the default GPT/UEFI path).
+fn read_bootloader_marker(path: &str) -> String {
+    std::fs::read_to_string(path)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "sdboot".to_string())
+}
+
 async fn run_daemon() -> anyhow::Result<()> {
     info!("machined starting (pid {})", std::process::id());
 
@@ -413,11 +422,18 @@ async fn run_daemon() -> anyhow::Result<()> {
     // comes from /proc/cmdline's machined.slot= token (parse_slot, default A).
     let upgrade_backend: std::sync::Arc<dyn bootloader::BootloaderBackend> = {
         let cmdline = std::fs::read_to_string("/proc/cmdline").unwrap_or_default();
-        std::sync::Arc::new(bootloader::SdBootBackend::new(
-            "/boot",
-            platform.clone(),
-            &cmdline,
-        ))
+        match read_bootloader_marker("/etc/machined/bootloader").as_str() {
+            "pi" => std::sync::Arc::new(bootloader::PiBootBackend::new(
+                "/boot",
+                platform.clone(),
+                &cmdline,
+            )),
+            _ => std::sync::Arc::new(bootloader::SdBootBackend::new(
+                "/boot",
+                platform.clone(),
+                &cmdline,
+            )),
+        }
     };
     info!(
         "booted from A/B slot {}",
@@ -542,6 +558,15 @@ mod tests {
                 last_message: String::new(),
             }),
         ));
+    }
+
+    #[test]
+    fn bootloader_marker_defaults_to_sdboot_when_absent() {
+        assert_eq!(read_bootloader_marker("/no/such/marker"), "sdboot");
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("bootloader");
+        std::fs::write(&p, "pi\n").unwrap();
+        assert_eq!(read_bootloader_marker(p.to_str().unwrap()), "pi");
     }
 
     #[test]
