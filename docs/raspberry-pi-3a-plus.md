@@ -24,7 +24,7 @@ Power on; the GPU firmware loads `bootcode.bin -> start.elf`, then the kernel +
 initramfs. On serial:
 - the kernel boots (Linux 6.12.13-...-rpi)
 - `machined starting (pid 1)`
-- `booted from A/B slot a` (a fresh image boots slot A — see the A/B section below)
+- `booted from A/B slot a` (slot A on a fresh flash; an upgrade switches to B — see the A/B section below)
 - `mounted boot partition /dev/mmcblk0p1 at /boot` (the vfat fallback)
 - `seeded PKI from /boot/pki`
 - `management API listening on 0.0.0.0:50000`
@@ -59,20 +59,22 @@ USB-Ethernet adapter from the section above to reach the bundle.
    tar -czf /tmp/bundle.tgz -C /tmp/boot-v2 vmlinuz initramfs.img
    sha256sum /tmp/bundle.tgz
    ```
+   (`--out` is required by the imager but its `.img` isn't used here — the
+   bundle is built from the `--emit-boot` dir.)
 2. Serve it where the Pi can reach it: `cd /tmp && python3 -m http.server 8080`.
 3. On the running v1 node (booted from slot A), trigger the upgrade:
    ```
    machinectl --bundle /tmp/pki/machinectl --endpoint https://<pi-ip>:50000 \
-     upgrade http://<workstation-ip>:8080/bundle.tgz <sha256-from-step-1>
+     upgrade http://<workstation-ip>:8080/bundle.tgz <sha256 of bundle.tgz from step 1>
    ```
-4. machined downloads + verifies the bundle, stages it into the inactive slot
-   `/B`, flips `config.txt` to `os_prefix=B/`, and reboots. Over serial you'll
-   see it reboot, then the firmware boots `/B`.
-5. Confirm the upgrade: over serial, machined logs `booted from A/B slot b`; and
+   machined then downloads + verifies the bundle, stages it into the inactive
+   slot `/B`, flips `config.txt` to `os_prefix=B/`, and reboots. Over serial
+   you'll see it reboot, then the firmware boots `/B`.
+4. Confirm the upgrade: over serial, machined logs `booted from A/B slot b`; and
    `machinectl … version` reports `image_id=v2`. The previous slot `/A` is
    untouched — it's the rollback target.
 
-**Manual rollback:** to revert to v1, flip the pointer back. Mount the FAT boot
+**Manual rollback:** to revert to v1, revert the `os_prefix` line. Mount the FAT boot
 partition on your workstation (or edit on the Pi if writable) and change
 `config.txt`'s `os_prefix=B/` back to `os_prefix=A/`, then reboot → the firmware
 boots `/A` (v1). machined does not yet do automatic health-gated rollback —
