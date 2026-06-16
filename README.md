@@ -124,6 +124,7 @@ grace-expired service kill is observable in the API rather than silent.
 | [aarch64 / Raspberry Pi 3A+ image](docs/raspberry-pi-3a-plus.md): QEMU boot (real SoC model) + manual hardware-verify | ✅ |
 | Atomic OS upgrade via in-process kexec (in-memory; M9a) | ✅ |
 | Boot from disk via systemd-boot + disk-persistent A/B upgrade, survives a cold reboot (x86; M9b-1) | ✅ |
+| [Pi-native A/B upgrade](docs/raspberry-pi-3a-plus.md) (config.txt `os_prefix`; CI: layout + backend, end-to-end hardware-verified) | ✅ |
 | upgrade: health-gated auto-rollback to the previous slot (M9b-2) | 🔜 next |
 | Streaming logs/events RPCs, per-service health probes | 🔜 planned |
 
