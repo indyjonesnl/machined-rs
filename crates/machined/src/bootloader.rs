@@ -221,7 +221,7 @@ impl BootloaderBackend for PiBootBackend {
             let content = std::fs::read_to_string(&conf)
                 .with_context(|| format!("read {}", conf.display()))?;
             let new = rewrite_os_prefix(&content, slot)?;
-            std::fs::write(&conf, &new)?;
+            std::fs::write(&conf, &new).with_context(|| format!("write {}", conf.display()))?;
             // config.txt is THE Pi boot pointer: fsync the file + the dir so the
             // os_prefix flip survives a power cut before we re-seal the ESP ro.
             let _ = std::fs::File::open(&conf).and_then(|f| f.sync_all());
